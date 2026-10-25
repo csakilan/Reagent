@@ -459,3 +459,43 @@ mark.redacted { padding: 0 4px; border-radius: 2px; background: var(--ink); colo
 .drawer-list .layer-tag { min-width: 116px; }
 .drawer-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .drawer-chip { margin: 0 4px 0 0; }
+
+/* Publish pipeline as a CI run: one collapsed row per step, expanding on demand.
+   Colour only through Verdict (verdict) and the status pill below. */
+.ci-steps { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.ci-step + .ci-step { border-top: 1px solid var(--line); }
+.ci-step > details > summary, .ci-item > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 16px; cursor: pointer; list-style: none; }
+.ci-step > details > summary::-webkit-details-marker, .ci-item > summary::-webkit-details-marker { display: none; }
+.ci-step > details > summary::before, .ci-item > summary::before { content: "▸"; color: var(--muted); font-size: 11px; width: 10px; }
+.ci-step > details[open] > summary::before, .ci-item[open] > summary::before { content: "▾"; }
+.ci-step > details > summary { background: var(--surface); }
+.ci-step-waiting > details > summary { background: var(--surface-2); }
+.ci-index { font: 500 12px var(--mono); color: var(--muted); width: 16px; }
+.ci-summary { flex: 1 1 260px; font-size: 13px; color: var(--muted); }
+.ci-detail { padding: 4px 16px 16px 42px; font-size: 13.5px; }
+.ci-what { margin: 8px 0 12px; }
+.ci-callout { margin: 10px 0 14px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--background); }
+.ci-callout p { margin: 0 0 10px; font-size: 13.5px; }
+.ci-items { display: grid; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.ci-item + .ci-item { border-top: 1px solid var(--line); }
+.ci-item > summary { padding: 9px 12px; font-size: 13px; }
+.ci-item .ci-detail { padding: 2px 14px 14px 34px; }
+.ci-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 900px) { .ci-grid { grid-template-columns: 1fr; } }
+.ci-grid h4, .ci-why h4 { margin: 10px 0 4px; font-size: 11.5px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.ci-why { margin: 6px 0 4px; padding: 8px 12px; border: 1px solid var(--denied); border-radius: var(--radius); background: var(--denied-wash); }
+.ci-why ul { margin: 0; padding-left: 18px; }
+.ci-output { max-height: 280px; overflow: auto; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ci-list { margin: 8px 0; padding-left: 18px; }
+.ci-list li { margin: 4px 0; }
+.ci-metrics { margin: 8px 0 12px; }
+.ci-status { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 3px; font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: .04em; }
+.ci-succeeded { color: var(--permitted); border-color: var(--permitted); }
+.ci-failed, .ci-abandoned { color: var(--denied); border-color: var(--denied); }
+.ci-running { color: var(--muted); }
+
+/* Trace viewer: what the run was about, above the waterfall. */
+.run-context { margin: 0 0 14px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); font-size: 13.5px; }
+.run-context p { margin: 0; }
+.run-context details { margin-top: 8px; }
+.run-context summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }

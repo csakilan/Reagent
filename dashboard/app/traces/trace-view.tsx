@@ -15,6 +15,44 @@ const payloadOf = (event: RunEvent) => (event.payload_redacted ?? {}) as Detail;
 const num = (value: unknown) => typeof value === "number" ? value : 0;
 const DEFAULT_INPUT = { "pr-reviewer": { repo: "nmc2/infra", pr_number: 42 } } as Record<string, object>;
 
+/** Runs do not store their input, so the dashboard keeps what it sent (per tab). */
+const RUN_INPUT_KEY = (id: number) => `reagent-run-input:${id}`;
+type RunContext = { agent?: string; version?: string; trigger?: string; subject?: string; via?: string; input?: unknown; inputFrom?: "sent" | "derived" };
+
+/** What the run was about: who ran, how it was triggered, and the PR or channel it worked on. */
+function contextOf(trace: Trace, runId: number): RunContext {
+  const events = trace.events.slice().sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+  const root = events.find(event => event.type === "span_open");
+  const head = root ? payloadOf(root) : {};
+  const out: RunContext = { agent: head.agent as string | undefined, version: head.version as string | undefined, trigger: head.trigger as string | undefined };
+  try {
+    const sent = typeof window !== "undefined" ? window.sessionStorage.getItem(RUN_INPUT_KEY(runId)) : null;
+    if (sent) { out.input = JSON.parse(sent); out.inputFrom = "sent"; }
+  } catch { /* storage blocked: derive from the trace instead */ }
+  for (const event of events) {
+    if (event.type !== "tool_call" || event.action?.startsWith("agent:")) continue;
+    const args = (payloadOf(event).args ?? {}) as Detail;
+    const pr = args.pr_number ?? args.number;
+    if (typeof args.repo === "string" && pr !== undefined) { out.subject = `${args.repo} #${pr}`; out.via = event.action ?? undefined; }
+    else if (typeof args.channel === "string") { out.subject = args.channel; out.via = event.action ?? undefined; }
+    if (out.subject) { if (out.input === undefined) { out.input = args; out.inputFrom = "derived"; } break; }
+  }
+  return out;
+}
+
+function ContextBar({ context }: { context: RunContext }) {
+  if (!context.agent && !context.subject) return null;
+  return <section className="run-context" aria-label="What this run was about">
+    <p>{context.agent && <><code>{context.agent}</code>{context.version ? ` ${context.version}` : ""}</>}
+      {context.trigger && <span className="muted"> · triggered by {context.trigger}</span>}
+      {context.subject ? <> · working on <b className="mono">{context.subject}</b></> : <span className="muted"> · no repository or channel in this run</span>}</p>
+    {context.input !== undefined && <details>
+      <summary>{context.inputFrom === "sent" ? "Input sent with this run" : `Arguments of the first ${context.via ?? "tool"} call`}</summary>
+      <Payload value={context.input} compact />
+    </details>}
+  </section>;
+}
+
 /** Flattens a run and its sub-agent runs into waterfall rows, timed from each call's own latency. */
 function buildRows(root: Trace, children: Map<number, Trace>): { rows: Row[]; total: number } {
   const rows: Row[] = [];
@@ -77,8 +115,10 @@ function RunForm({ initialAgent }: { initialAgent: string }) {
     setBusy(true); setProblem(null);
     const outcome = await call<RunResult>(startRun(agent, parsed));
     setBusy(false);
-    if (outcome.ok) router.push(`/traces?run=${outcome.data.run_id}`);
-    else setProblem({ detail: outcome.detail, rejections: outcome.rejections });
+    if (outcome.ok) {
+      try { window.sessionStorage.setItem(RUN_INPUT_KEY(outcome.data.run_id), JSON.stringify(parsed)); } catch { /* context falls back to the trace */ }
+      router.push(`/traces?run=${outcome.data.run_id}`);
+    } else setProblem({ detail: outcome.detail, rejections: outcome.rejections });
   }
 
   const names = agents.phase === "ready" ? agents.data.agents.map(item => item.name) : [];
@@ -135,6 +175,7 @@ function RunTrace({ runId }: { runId: number }) {
   }, [trace]);
 
   const built = useMemo(() => trace.phase === "ready" ? buildRows(trace.data, children) : { rows: [], total: 0 }, [trace, children]);
+  const context = useMemo(() => trace.phase === "ready" ? contextOf(trace.data, runId) : {}, [trace, runId]);
   const events = built.rows.map(row => row.event);
   const tools = events.filter(event => event.type === "tool_call");
   const denied = tools.filter(event => event.allowed === false).length;
@@ -144,11 +185,12 @@ function RunTrace({ runId }: { runId: number }) {
   const toggle = (index: number) => setOpen(current => { const next = new Set(current); if (next.has(index)) next.delete(index); else next.add(index); return next; });
 
   return <>
-    <PageHead crumb="Runs / Trace viewer" title={<span className="mono-title">run {runId}</span>} subtitle={result ? <>{result.model ? <>Model <code>{result.model}</code></> : "Redacted span waterfall"}{result.parent_run_id ? <> · child of <Link href={`/traces?run=${result.parent_run_id}`}>run {result.parent_run_id}</Link></> : null}</> : "Redacted span waterfall"}>
+    <PageHead crumb="Runs / Trace viewer" title={<span className="mono-title">run {runId}{context.agent ? ` · ${context.agent}` : ""}{context.subject ? ` on ${context.subject}` : ""}</span>} subtitle={result ? <>{result.model ? <>Model <code>{result.model}</code></> : "Redacted span waterfall"}{result.parent_run_id ? <> · child of <Link href={`/traces?run=${result.parent_run_id}`}>run {result.parent_run_id}</Link></> : null}</> : "Redacted span waterfall"}>
       <SourceTag state={trace} />
       <button className="button" type="button" onClick={() => { reloadRun(); reloadTrace(); }}>Refresh</button>
       <Link className="button" href="/traces">New run</Link>
     </PageHead>
+    <ContextBar context={context} />
 
     {run.phase === "loading" ? <Skeleton rows={1} columns={6} label="Loading run" /> : result && <div className="stat-row">
       <div><span>Status</span><Verdict kind={statusKind}>{result.status.replace("_", " ")}</Verdict></div>
