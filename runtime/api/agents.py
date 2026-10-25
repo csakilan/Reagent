@@ -67,28 +67,40 @@ def _summary(doc: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("/agents")
-def get_agents(q: str | None = None, tag: str | None = None,
-               x_reagent_user: str | None = Header(default=None)):
+def get_agents(q: str | None = None, tag: str | None = None, rewrite: bool = False,
+               limit: int | None = None, x_reagent_user: str | None = Header(default=None)):
     """The caller's collection, filtered SERVER-side (SPEC.md §2): a member sees only
-    their own team's agents, never enterprise-level ones. Admins see everything."""
+    their own team's agents, never enterprise-level ones. Admins see everything.
+
+    With `q`, ranked by OUTCOME (runtime/api/agent_search.py): the query is matched
+    against what each agent achieves, measured results break ties, and each hit
+    carries `match: {score, reason, matched}`. Visibility is applied BEFORE ranking,
+    so another team's agents never influence the scores. `rewrite=true` lets a
+    cheap model restate a request-shaped query as a desired outcome (live only)."""
+    from runtime.api import agent_search
     cat = load_catalog()
     _, is_admin, team = _principal(cat, x_reagent_user)
-    out = []
+    measured = agent_search.measured_results()
+    docs, items = [], {}
     for name in sorted(cat.agents):
         doc = cat.latest(name)
         if doc is None or not _visible(doc, is_admin, team):
             continue
         item = _summary(doc)
+        for k, v in (measured.get(name) or {}).items():
+            item[k] = v
         if tag and tag not in item["tags"]:
             continue
-        if q:
-            hay = " ".join([item["name"], item["description"], item["desired_outcome"] or "",
-                            " ".join(item["tags"])]).lower()
-            if not all(w in hay for w in q.lower().split()):
-                continue
+        docs.append(doc)
+        items[name] = item
+    if not q or not q.strip():
+        return {"agents": list(items.values())}
+    query = agent_search.expand_query(q) if rewrite else q
+    out = []
+    for hit in agent_search.rank(query, docs, items)[: limit or None]:
+        item = items[hit["name"]]
+        item["match"] = {"score": hit["score"], "reason": hit["reason"], "matched": hit["matched"]}
         out.append(item)
-    if q:   # SPEC.md §2 search: matches on the desired outcome rank first
-        out.sort(key=lambda a: (q.lower() not in (a["desired_outcome"] or "").lower(), a["name"]))
     return {"agents": out}
 
 
