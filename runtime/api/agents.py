@@ -210,6 +210,42 @@ def post_continue(run_id: int, x_reagent_user: str | None = Header(default=None)
         return _refusal(e, 409)
 
 
+@router.post("/admin/calibration", tags=["admin"])
+def post_calibration(body: dict[str, Any] = Body(...),
+                     x_reagent_user: str | None = Header(default=None)):
+    """Add human labels, then re-grade every label with the current judge (FROZEN D19).
+    Enterprise admins only: calibration decides whether the judge may gate a publish."""
+    from runtime.evals.judge import recalibrate
+
+    cat = load_catalog()
+    user, is_admin, _ = _principal(cat, x_reagent_user)
+    if not is_admin:
+        raise HTTPException(403, "enterprise admins only")
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise HTTPException(503, "calibration labels live in the database, and none is configured")
+    labels = (body or {}).get("labels")
+    if not isinstance(labels, list) or not all(
+            isinstance(l, dict) and {"case_name", "output_redacted", "human_verdict"} <= set(l)
+            for l in labels):
+        raise HTTPException(422, "labels must be a list of {case_name, output_redacted, human_verdict}")
+    import psycopg
+    from runtime.guardrails.redaction import Redactor
+    redact = Redactor()
+    with psycopg.connect(url, connect_timeout=15) as c:
+        uid = c.execute("SELECT id FROM users WHERE name = %s", (user,)).fetchone()
+        if uid is None:
+            raise HTTPException(403, f"{user} is not a known user")
+        for l in labels:
+            # The column is named _redacted: redact BEFORE the write, never on read.
+            text = redact.redact_text(str(l["output_redacted"]))[0]
+            c.execute("INSERT INTO calibration_labels (agent_version_id, case_name, output_redacted, "
+                      "human_verdict, labeled_by) VALUES (%s, %s, %s, %s, %s)",
+                      (l.get("agent_version_id"), l["case_name"], text, bool(l["human_verdict"]), uid[0]))
+    out = recalibrate(cat, url)
+    return {k: out[k] for k in ("agreement", "kappa", "n_labels", "calibrated", "judge_model")}
+
+
 NAME = re.compile(r"^[a-z0-9-]+$")
 
 

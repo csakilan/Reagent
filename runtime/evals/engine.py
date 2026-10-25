@@ -57,16 +57,22 @@ def collect_cases(cat: Any, doc: dict[str, Any], include_inherited: bool = True)
 
 
 # -- judge, FROZEN D19 -----------------------------------------------------------
-def judge_calibration(cat: Any) -> dict[str, Any]:
-    """Calibration lives only in `calibration_labels`. With no database there are
-    no labels, so the judge is uncalibrated by construction (D8)."""
-    judge = (cat.ent.get("evaluation") or {}).get("judge") or {}
-    need = judge.get("calibration_min_labels", 30)
-    if not os.environ.get("DATABASE_URL"):
-        return {"calibrated": False, "reason": "no calibration labels (no database)",
-                "labels": 0, "min_labels": need}
-    return {"calibrated": False, "reason": "calibration not computed yet", "labels": None,
-            "min_labels": need}
+def judge_calibration(cat: Any, agent_openrouter_id: str | None) -> dict[str, Any]:
+    """Which rubrics the current judge is calibrated on (D19). With no database
+    there are no labels, so every rubric is uncalibrated by construction (D8)."""
+    from .judge import calibration_state, pick_model, settings
+    model = pick_model(cat, agent_openrouter_id)
+    try:
+        rubrics = calibration_state(cat, model)
+    except Exception as e:  # noqa: BLE001 - a missing database must not fail an eval
+        rubrics = {}
+        reason = f"calibration unavailable: {type(e).__name__}"
+    else:
+        reason = None if rubrics else "no calibration labels"
+    return {"model": model, "rubrics": rubrics, "reason": reason,
+            "min_labels": settings(cat)["calibration_min_labels"],
+            "min_agreement": settings(cat)["min_agreement"],
+            "calibrated": any(r["calibrated"] for r in rubrics.values())}
 
 
 # -- running ---------------------------------------------------------------------
@@ -123,13 +129,27 @@ def run_once(resolved: dict[str, Any], case: dict[str, Any], user: str | None,
 
 
 def grade(case: dict[str, Any], trace: Trace, output_schema: dict[str, Any] | None,
-          judge_calibrated: bool) -> dict[str, Any]:
+          calib: dict[str, Any], cat: Any = None) -> dict[str, Any]:
+    """Code checks first. The judge runs only on a rubric it is calibrated for, and
+    only then does its verdict count; otherwise it is reported as uncalibrated."""
+    from .checks import output_string
+    from .judge import judge, rubric_hash
     checks = run_checks(case.get("expect", {}), trace, output_schema)
-    if "judge" in case.get("expect", {}):
-        checks["judge"] = {"passed": None, "gating": False,
-                           "detail": "uncalibrated: reported, never gates" if not judge_calibrated
-                           else "not run"}
-    code_ok = all(v["passed"] for k, v in checks.items() if k != "judge")
+    exp = case.get("expect", {})
+    if "judge" in exp:
+        state = calib["rubrics"].get(rubric_hash(exp["judge"]))
+        if state and state["calibrated"] and cat is not None and trace.status == "succeeded":
+            v = judge(cat, calib["model"], exp["judge"], exp.get("reference", ""),
+                      output_string(trace, output_schema))
+            trace.cost_usd += v["cost_usd"]
+            checks["judge"] = {"passed": v["passed"], "gating": True, "votes": v["votes"],
+                               "model": v["model"], "agreement": state["agreement"]}
+        else:
+            checks["judge"] = {"passed": None, "gating": False,
+                               "detail": "uncalibrated: reported, never gates",
+                               "n_labels": state["n_labels"] if state else 0}
+    code_ok = all(v["passed"] for k, v in checks.items()
+                  if k != "judge" or v.get("gating"))
     ran_ok = trace.status == "succeeded" and not trace.unmocked
     return {"passed": bool(code_ok and ran_ok), "checks": checks,
             "trajectory_ok": all(checks[k]["passed"] for k in TRAJECTORY if k in checks),
@@ -162,7 +182,7 @@ def run_evals(agent: str, runs_per_case: int | None = None, *, fake_model: bool 
         report["gate_reasons"] = [r["code"] for r in resolved["rejections"]]
         return report
 
-    calib = judge_calibration(cat)
+    calib = judge_calibration(cat, resolved["effective"]["model"].get("openrouter_model"))
     report["judge_calibrated"] = calib["calibrated"]
     report["judge"] = calib
     output_schema = doc.get("spec", {}).get("output")
@@ -172,14 +192,22 @@ def run_evals(agent: str, runs_per_case: int | None = None, *, fake_model: bool 
     if case_ids is not None:
         cases = [c for c in cases if c["case_id"] in case_ids]
 
+    def counts(case: dict[str, Any]) -> bool:
+        """A case counts toward the pass rate if it has a code check, or a judge
+        rubric that is calibrated (SPEC.md §7). An uncalibrated judge never counts."""
+        from .judge import rubric_hash
+        rubric = case.get("expect", {}).get("judge")
+        state = calib["rubrics"].get(rubric_hash(rubric)) if rubric else None
+        return has_code_check(case) or bool(state and state["calibrated"])
+
     runs: list[tuple[dict[str, Any], dict[str, Any], Trace]] = []
     with _model_mode(fake_model):
         for item in cases:
-            gating = has_code_check(item["case"])
+            gating = counts(item["case"])
             graded = []
             for _ in range(k):
                 tr = run_once(resolved, item["case"], user, list(strip_mocks or []), item["origin"])
-                g = grade(item["case"], tr, output_schema, calib["calibrated"])
+                g = grade(item["case"], tr, output_schema, calib, cat)
                 graded.append(g)
                 runs.append((item, g, tr))
             mine = [t for i, _, t in runs if i is item]
@@ -197,7 +225,7 @@ def run_evals(agent: str, runs_per_case: int | None = None, *, fake_model: bool 
                                 else []),
             })
 
-    gate_runs = [(i, g, t) for i, g, t in runs if has_code_check(i["case"])]
+    gate_runs = [(i, g, t) for i, g, t in runs if counts(i["case"])]
     n, p = len(gate_runs), sum(1 for _, g, _ in gate_runs if g["passed"])
     lo, hi = wilson(p, n)
     by_kind = lambda kind: [(g, t) for i, g, t in gate_runs if i["kind"] == kind]

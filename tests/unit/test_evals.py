@@ -131,3 +131,47 @@ def test_inherited_cases_get_inert_mocks_unless_strict_is_asked_for(monkeypatch)
     c = inert["cases"][0]
     assert c["error"] is None and c["passed"]
     assert "github:pulls.read" in c["inert_mocks"]
+
+
+# -- the judge and its calibration, FROZEN D19 -----------------------------------------
+from runtime.evals.judge import agreement_and_kappa, fake_vote, pick_model, rubric_hash  # noqa: E402
+from runtime.evals.engine import grade  # noqa: E402
+from runtime.resolver import load_catalog  # noqa: E402
+
+
+def test_agreement_and_cohens_kappa():
+    assert agreement_and_kappa([True, True, False, False], [True, True, False, False]) == (1.0, 1.0)
+    agree, kappa = agreement_and_kappa([True, False, True, False], [True, True, False, False])
+    assert agree == 0.5 and kappa == 0.0
+    assert agreement_and_kappa([], []) == (0.0, None)
+
+
+def test_judge_runs_on_a_different_provider_than_the_agent():
+    cat = load_catalog()
+    assert pick_model(cat, "qwen/qwen3-coder-30b-a3b-instruct") == "claude-sonnet"
+    assert not pick_model(cat, "anthropic/claude-sonnet-5.5").startswith("claude")
+
+
+CASE = {"name": "c", "input": {}, "expect": {"judge": "Does it say rotate?",
+                                             "reference": "The credential must be rotated immediately."}}
+
+
+def calib(calibrated):
+    return {"model": "claude-sonnet", "rubrics": {rubric_hash(CASE["expect"]["judge"]): {
+        "calibrated": calibrated, "agreement": 0.9, "n_labels": 40}}}
+
+
+def test_uncalibrated_judge_is_reported_never_counted():
+    g = grade(CASE, Trace(status="succeeded", text="looks fine"), None, calib(False), load_catalog())
+    assert g["checks"]["judge"]["gating"] is False and g["passed"]
+
+
+def test_calibrated_judge_gates(monkeypatch):
+    monkeypatch.setenv("REAGENT_MODEL", "fake")
+    cat = load_catalog()
+    bad = grade(CASE, Trace(status="succeeded", text="looks fine"), None, calib(True), cat)
+    good = grade(CASE, Trace(status="succeeded", text="Rotate the credential immediately."), None,
+                 calib(True), cat)
+    assert bad["checks"]["judge"]["gating"] and not bad["passed"]
+    assert good["passed"] and len(good["checks"]["judge"]["votes"]) == 3
+    assert fake_vote("q", "rotate credential immediately", "") is False

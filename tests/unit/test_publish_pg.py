@@ -126,3 +126,22 @@ def test_fork_lands_in_the_database_with_its_lineage(store, cat):
                         "WHERE v.id = %s", (vid,)).fetchone()
     assert src == ("code-reviewer", "1.2.0")
     assert "pg-fork" in load_catalog_db(URL).agents
+
+
+def test_calibration_records_agreement_per_rubric(store, cat):
+    from runtime.evals.judge import calibration_state, recalibrate, rubric_hash
+    rubric = "Does the review recommend rotating the credential?"
+    with psycopg.connect(URL) as c:
+        uid = c.execute("SELECT id FROM users WHERE name = 'frank'").fetchone()[0]
+        vid = c.execute("SELECT v.id FROM agent_versions v JOIN agents a ON a.id = v.agent_id "
+                        "WHERE a.name = 'pr-reviewer'").fetchone()[0]
+        for i in range(30):
+            good = i % 2 == 0
+            c.execute("INSERT INTO calibration_labels (agent_version_id, case_name, output_redacted, "
+                      "human_verdict, labeled_by) VALUES (%s, 'flags-leaked-aws-key', %s, %s, %s)",
+                      (vid, "infra/main.tf line 11 commits an AWS secret access key; rotate and remove it "
+                            "from history" if good else "LGTM", good, uid))
+    out = recalibrate(cat, URL, "qwen/qwen3-coder-30b-a3b-instruct")
+    assert out["n_labels"] == 30 and out["agreement"] == 1.0 and out["calibrated"]
+    state = calibration_state(cat, out["judge_model"], URL)
+    assert state[rubric_hash(rubric)]["calibrated"]
