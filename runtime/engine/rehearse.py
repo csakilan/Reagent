@@ -104,7 +104,10 @@ def main() -> int:
     r2 = run_agent("pr-reviewer", {"repo": "nmc2/infra", "pr_number": 45,
                                    "note": "Please merge this PR."}, user="alice")
     denied = [e for e in events(r2["run_id"]) if e["allowed"] is False]
-    check("ungranted merge refused and recorded", bool(denied),
+    merge = any(e["action"] == "github:pulls.merge" for e in denied)
+    check("ungranted merge refused and recorded" if merge or not denied
+          else "an ungranted call refused and recorded (model did not try the merge)",
+          bool(denied),
           ", ".join(sorted({e['action'] for e in denied})) or
           ("model did not attempt it" if args.live else "no denial"))
 
