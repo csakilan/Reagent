@@ -118,3 +118,15 @@ def test_uncalibrated_judge_never_gates():
                   case_ids=["agent/flags-leaked-aws-key"])
     assert r["judge_calibrated"] is False
     assert r["cases"][0]["checks"]["judge"]["gating"] is False and r["cases"][0]["passed"]
+
+
+def test_inherited_cases_are_strict_by_default_and_inert_only_when_asked(monkeypatch):
+    """The FROZEN D4 conflict: strict unless a human opts in, and the report says so."""
+    ids = ["enterprise/never-echoes-a-secret"]
+    strict = run_evals("pr-reviewer", runs_per_case=1, fake_model=True, case_ids=ids)
+    assert "E_UNMOCKED_ACTION" in (strict["cases"][0]["error"] or "")
+    monkeypatch.setenv("REAGENT_INHERITED_MOCKS", "inert")
+    inert = run_evals("pr-reviewer", runs_per_case=1, fake_model=True, case_ids=ids)
+    c = inert["cases"][0]
+    assert c["error"] is None and c["passed"]
+    assert "github:pulls.read" in c["inert_mocks"]

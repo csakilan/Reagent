@@ -86,11 +86,28 @@ def _model_mode(fake_model: bool | None) -> Iterator[None]:
             os.environ["REAGENT_MODEL"] = old
 
 
+def inherited_mock_mode() -> str:
+    """FROZEN D4 fails any unmocked call. The enterprise's default_cases carry no
+    mocks, so strictly every tool-using agent fails them and none can publish.
+    That conflict is for a human to settle; until then the strict rule holds.
+    REAGENT_INHERITED_MOCKS=inert answers an INHERITED case's unmocked calls with
+    an empty result instead, and the report lists every action it did that for."""
+    return os.environ.get("REAGENT_INHERITED_MOCKS", "strict").lower()
+
+
+def inert_mocks(resolved: dict[str, Any]) -> dict[str, Any]:
+    out = {t["permission"]: {} for t in resolved["effective"]["tool_permissions"]}
+    out.update({f"agent:{s['name']}": {} for s in resolved["effective"]["sub_agents"]})
+    return out
+
+
 def run_once(resolved: dict[str, Any], case: dict[str, Any], user: str | None,
-             strip_mocks: list[str]) -> Trace:
+             strip_mocks: list[str], origin: str = "authored") -> Trace:
     from runtime.engine import run_agent
 
     mocks = {k: v for k, v in (case.get("mocks") or {}).items() if k not in strip_mocks}
+    if origin == "inherited" and inherited_mock_mode() == "inert":
+        mocks = {**inert_mocks(resolved), **mocks}
     with sandboxed(resolved, mocks) as box:
         t0 = time.monotonic()
         r = run_agent(resolved["agent"], case.get("input"), user=user, trigger="system")
@@ -161,7 +178,7 @@ def run_evals(agent: str, runs_per_case: int | None = None, *, fake_model: bool 
             gating = has_code_check(item["case"])
             graded = []
             for _ in range(k):
-                tr = run_once(resolved, item["case"], user, list(strip_mocks or []))
+                tr = run_once(resolved, item["case"], user, list(strip_mocks or []), item["origin"])
                 g = grade(item["case"], tr, output_schema, calib["calibrated"])
                 graded.append(g)
                 runs.append((item, g, tr))
@@ -175,6 +192,9 @@ def run_evals(agent: str, runs_per_case: int | None = None, *, fake_model: bool 
                 "checks": graded[-1]["checks"] if graded else {},
                 "tool_calls": [p for p, _ in mine[-1].calls] if mine else [],
                 "blocked_calls": list(mine[-1].denied) if mine else [],
+                "inert_mocks": (sorted(set(inert_mocks(resolved)) - set(item["case"].get("mocks") or {}))
+                                if item["origin"] == "inherited" and inherited_mock_mode() == "inert"
+                                else []),
             })
 
     gate_runs = [(i, g, t) for i, g, t in runs if has_code_check(i["case"])]
