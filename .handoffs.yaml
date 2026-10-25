@@ -67,7 +67,7 @@ handoffs:
       the rest) has been sent privately to all three other laptops, and each has
       confirmed it loads. Never committed, never in the shared repo.
     verify: "python scripts/doctor.py   # on EACH laptop: the .env check must be green"
-    status: pending
+    status: "ready"
     deadline: "2026-10-25T03:45:00-05:00"
     fallback: "Send DATABASE_URL and OPENROUTER_API_KEY alone; the GitHub and Slack values can follow later, since only wf/runtime needs them and only once H3 lands."
 
