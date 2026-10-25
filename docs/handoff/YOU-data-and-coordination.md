@@ -12,6 +12,8 @@ database (H4, 03:30) and once for the secrets (H7, 03:45).
 
 ## 1. Hand out three files, right now · 2 minutes
 
+Tell them all to start with **`docs/handoff/SETUP.md`**, then their own file.
+
 | Send | To | Their first job |
 |---|---|---|
 | `LAPTOP-resolver.md` | the one happiest writing careful logic with tests | the tighten-only merge, **H1 by 05:00** |
@@ -120,10 +122,9 @@ Slack is **third in the cut order**. GitHub alone carries the demo. Do not spend
 
 Do this between browser jobs; the agent works while you click.
 
+Do `docs/handoff/SETUP.md` first if you have not already, then:
+
 ```
-git clone https://github.com/hanhg/Reagent.git
-cd Reagent
-python scripts/doctor.py --fix
 git checkout -b wf/data origin/wf/data
 claude
 ```

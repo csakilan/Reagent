@@ -5,31 +5,18 @@ until your resolver produces output. That is handoff **H1, due 05:00**. You are
 also building the part the whole pitch rests on, so you want the two most
 uninterrupted hours of anyone on the team.
 
-## Setup · 3 minutes · Windows
+## Setup
 
-Open **PowerShell** and run these first. They prevent two problems that each
-cost an hour to diagnose at 4 AM:
+**Do `docs/handoff/SETUP.md` first.** It installs Git, Python and
+Claude Code in the right order, and covers the Windows traps: the Microsoft Store
+Python stub, the line-ending problem, and the path-length limit.
 
-```
-git config --global core.autocrlf input
-git config --global core.longpaths true
-```
-
-Then:
+Come back here once `python scripts/doctor.py` says **Ready to build** and you
+are on your branch:
 
 ```
-git clone https://github.com/hanhg/Reagent.git
-cd Reagent
-python scripts\doctor.py --fix
 git checkout -b wf/resolver origin/wf/resolver
 ```
-
-If `python` is not found, try `py -3` instead, for this and every command below.
-Fix anything `doctor.py` marks **BAD**; warnings are fine. You do **not** need
-Docker, and you do **not** need the database to start.
-
-Copy `.env.example` to `.env`. Ask for the real values when they arrive, but
-**start without them.**
 
 ## Then start your agent
 

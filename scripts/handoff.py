@@ -30,7 +30,7 @@ import tempfile
 try:
     import yaml
 except ImportError:
-    sys.exit("pyyaml missing. Run: python3 -m pip install pyyaml  (or scripts/bootstrap.sh)")
+    sys.exit("pyyaml missing. Run: python scripts/doctor.py --fix")
 
 BOARD = ".handoffs.yaml"
 REMOTE = "origin"

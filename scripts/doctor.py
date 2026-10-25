@@ -65,12 +65,58 @@ def ver_tuple(s: str) -> tuple[int, ...]:
 def check_python() -> None:
     v = sys.version_info
     found = f"{v.major}.{v.minor}.{v.micro} ({sys.executable})"
+    # The Microsoft Store ships a `python` stub that opens the Store instead of
+    # running. It is the single most common Windows false start.
+    if WIN and "WindowsApps" in sys.executable:
+        record(BAD, "Python >= 3.11", found + "  [Microsoft Store stub]",
+               "This is the Store placeholder, not a real Python. Install the real one: "
+               "winget install Python.Python.3.12   then CLOSE and REOPEN the terminal. "
+               "If `python` still opens the Store, turn off Settings > Apps > "
+               "App execution aliases > python.exe")
+        return
     if (v.major, v.minor) >= (3, 11):
         record(OK, "Python >= 3.11", found)
     else:
         record(BAD, "Python >= 3.11", found,
                install_hint("brew install python@3.12",
                             "winget install Python.Python.3.12   (then reopen the terminal)"))
+
+
+def check_claude_code() -> None:
+    """The one thing everything else depends on."""
+    out = run(["claude", "--version"])
+    if not out:
+        record(BAD, "Claude Code", "missing",
+               install_hint(
+                   "curl -fsSL https://claude.ai/install.sh | bash",
+                   "In PowerShell:  irm https://claude.ai/install.ps1 | iex")
+               + "   Then open a NEW terminal and run: claude --version")
+        return
+    record(OK, "Claude Code", out.splitlines()[0])
+    # Needs a paid plan. The free claude.ai tier does not include Claude Code,
+    # and the failure arrives at login, after setup looks finished.
+    record(WARN, "Claude Code plan", "cannot check from here",
+           "Needs Pro, Max, Team or Enterprise. The FREE claude.ai plan does not "
+           "include Claude Code. Run `claude` once and sign in before the build starts.")
+
+
+def check_git_bash() -> None:
+    """On native Windows, Claude Code uses Git Bash for its Bash tool. Without
+    it, it falls back to PowerShell and the commands in the briefs need
+    rewriting, so this is worth more than it looks."""
+    if not WIN:
+        return
+    for p in (r"C:\Program Files\Git\bin\bash.exe",
+              r"C:\Program Files (x86)\Git\bin\bash.exe"):
+        if os.path.exists(p):
+            record(OK, "Git Bash", p)
+            return
+    if shutil.which("bash"):
+        record(OK, "Git Bash", "bash on PATH")
+        return
+    record(WARN, "Git Bash", "missing",
+           "winget install Git.Git   Claude Code uses Git Bash for its Bash tool; "
+           "without it the commands in your brief need rewriting for PowerShell.")
 
 
 def check_git() -> None:
@@ -207,7 +253,8 @@ def main() -> int:
                         "pyyaml", "jsonschema"], check=False)
         print()
 
-    for fn in (check_python, check_git, check_node, check_pyyaml, check_jsonschema,
+    for fn in (check_python, check_git, check_git_bash, check_claude_code,
+               check_node, check_pyyaml, check_jsonschema,
                check_docker, check_psql, check_env, check_ports, check_net):
         try:
             fn()
@@ -230,7 +277,12 @@ def main() -> int:
     print(f"{C['green']}{C['bold']}Ready to build.{C['reset']}"
           + (f"  {len(warn)} warning(s) above, none blocking." if warn else "") + "\n")
     print(f"  Next:  python scripts/handoff.py status\n"
-          f"         read CLAUDE.md, then docs/agents/<your workflow>.md\n")
+          f"         then follow your file in docs/handoff/\n")
+    print(f"  {C['bold']}Paste this line back to whoever is coordinating:{C['reset']}")
+    print(f"  READY {platform.system()} py{sys.version_info.major}.{sys.version_info.minor} "
+          f"claude={'yes' if shutil.which('claude') else 'NO'} "
+          f"node={'yes' if shutil.which('node') else 'no'} "
+          f"warn={len(warn)}\n")
     return 0
 
 

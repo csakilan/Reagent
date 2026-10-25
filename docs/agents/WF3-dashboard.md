@@ -8,11 +8,12 @@ because every screen has a fixture to build against.
 
 ## Read, in this order
 
-1. `CLAUDE.md` (already loaded) — **§10 is the binding design spec**
-2. `contracts/openapi.yaml` — generate your client, do not hand-write fetches
-3. `contracts/resolved_spec.schema.json` — the resolved view is your signature screen
-4. `docs/decisions/FROZEN.md` — **D3, D15, D16, D17, D22, D23**
-5. `spec/SPEC.md` §2 (what a member may see), §11 (the pipeline), §14
+1. Your context file, already loaded: `AGENTS.md` on Codex, `CLAUDE.md` on Claude Code
+2. `dashboard/AGENTS.md` — **the binding design spec. Not advisory.**
+3. `contracts/openapi.yaml` — generate your client, do not hand-write fetches
+4. `contracts/resolved_spec.schema.json` — the resolved view is your signature screen
+5. `docs/decisions/FROZEN.md` — **D3, D15, D16, D17, D22, D23**
+6. `spec/SPEC.md` §2 (what a member may see), §11 (the pipeline), §14
 
 ## You own
 
@@ -26,7 +27,7 @@ reach into `runtime/`.
 ## Design is already decided. It is not open for reinterpretation.
 
 This has to read as an internal enterprise tool, not a generated template.
-`CLAUDE.md` §10 has the full list. The short version:
+`dashboard/AGENTS.md` has the full list. The short version:
 
 **Colour encodes provenance and verdict, and nothing else.** If something is
 coloured it is telling you which layer a value came from, or whether an action

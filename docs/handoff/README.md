@@ -2,12 +2,16 @@
 
 Four people, four laptops: one macOS and three Windows.
 
+**Everyone starts with [`SETUP.md`](SETUP.md)**, which installs Git, Python, Node
+and Claude Code in the right order and covers the Windows traps. Then they open
+their own file below.
+
 | File | Goes to | Their first milestone |
 |---|---|---|
 | `YOU-data-and-coordination.md` | the MacBook | database up (**H4, 03:30**) and secrets sent (**H7, 03:45**) |
 | `LAPTOP-resolver.md` | Windows 1 | the tighten-only merge (**H1, 05:00**) |
 | `LAPTOP-runtime.md` | Windows 2 | an agent running from a resolved spec (**H2, 06:30**) |
-| `LAPTOP-dashboard.md` | Windows 3 | the resolved view, then the trace viewer |
+| `LAPTOP-dashboard.md` | the **Codex** laptop | the resolved view, then the trace viewer |
 
 The MacBook takes data and integrations because the browser work (Tiger signup,
 the GitHub App, the tunnel) is not separate from that role, it **is** that
@@ -36,7 +40,9 @@ hour of improvisation at 04:00.
 
 It lives in the repo, and every agent loads it automatically.
 
-- `CLAUDE.md` — the whole context, loaded on every session without being asked
+- `CLAUDE.md` — the whole context, loaded automatically by Claude Code
+- `AGENTS.md` — the same content for the Codex laptop, generated and CI-checked
+- `dashboard/AGENTS.md` — the design rules, loaded on top when working there
 - `docs/decisions/FROZEN.md` — 25 spec ambiguities, each with one answer
 - `docs/research/` — external facts verified against live docs and real servers
 - `docs/agents/WF*.md` — the detailed brief each agent follows

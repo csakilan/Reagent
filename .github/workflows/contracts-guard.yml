@@ -45,6 +45,12 @@ jobs:
           echo "To override deliberately, add the label 'contract-change' to the PR."
           exit 1
 
+      - name: AGENTS.md is in step with CLAUDE.md
+        if: always()
+        run: |
+          python -m pip install -q pyyaml jsonschema
+          python scripts/sync_agent_docs.py --check
+
       - name: Contracts still valid
         if: always()
         run: |

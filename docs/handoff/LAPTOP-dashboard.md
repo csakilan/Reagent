@@ -4,45 +4,40 @@ You build the only part a judge looks at directly. You are also the one person
 who is **never blocked**, because every screen has test data to build against
 from the first minute.
 
-## Setup · 5 minutes · Windows
+## Setup
 
-Open **PowerShell** and run these first. They prevent two problems that each cost
-an hour to diagnose at 4 AM, and the second one matters most to you because
-`node_modules` paths are long:
+**Do `docs/handoff/SETUP.md` first.** It installs Git, Python, Node and
+Claude Code in the right order, and covers the Windows traps: the Microsoft Store
+Python stub, the line-ending problem, and the path-length limit.
 
-```
-git config --global core.autocrlf input
-git config --global core.longpaths true
-```
-
-Then:
+Come back here once `python scripts/doctor.py` says **Ready to build** and you
+are on your branch:
 
 ```
-git clone https://github.com/hanhg/Reagent.git
-cd Reagent
-python scripts\doctor.py --fix
 git checkout -b wf/dashboard origin/wf/dashboard
 ```
 
-If `python` is not found, try `py -3` instead. You need **Node 20 or newer**, and
-`doctor.py` will tell you if not. Fix anything marked **BAD**; warnings are fine.
-You do **not** need Docker and you do **not** need the database.
-
-Copy `.env.example` to `.env`. You can ignore nearly all of it; you only need
-`NEXT_PUBLIC_API_URL`.
-
 ## Then start your agent
 
+You are the one laptop on **Codex**, so it is `codex`, not `claude`:
+
 ```
-claude
+codex
 ```
+
+Codex does not read `CLAUDE.md`. It reads `AGENTS.md` at the repo root, and
+**also** `dashboard/AGENTS.md` once you are working in that directory. The
+second one holds your design rules and carries more weight because it sits
+closer to the code. Both are already written, so the context arrives without you
+pasting it.
 
 Paste this in:
 
 > You are the WF3 dashboard agent on branch `wf/dashboard` of this repo. Read
-> `docs/agents/WF3-dashboard.md` and follow it exactly. Section 10 of `CLAUDE.md`
-> is a binding design specification, not a suggestion: colour encodes provenance
-> and verdict and nothing else, and the banned list is absolute. Generate your
+> `docs/agents/WF3-dashboard.md` and follow it exactly, and treat
+> `dashboard/AGENTS.md` as binding rather than advisory: colour encodes
+> provenance and verdict and nothing else, and the banned list is absolute.
+> Generate your
 > typed API client from `contracts/openapi.yaml` rather than hand-writing fetch
 > calls. You are never blocked: build every screen against the files in
 > `fixtures/`, and swap to live calls as `python scripts/handoff.py status` shows
