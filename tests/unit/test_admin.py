@@ -98,3 +98,32 @@ def test_platform_actions_are_filtered_by_the_caller():
     assert out["team"] == "platform-eng" and out["status"] == "draft"      # never another team's
     source._DRAFTS.pop("proposed-x", None)
     assert platform.call("request_connector", "bob", {"description": "slack"})["team"] == "platform-eng"
+
+
+def _signed(body: dict, secret: str = "test-secret", age: int = 0):
+    import hashlib, hmac, json as _json, time
+    raw = _json.dumps(body).encode()
+    ts = str(int(time.time()) - age)
+    sig = "v0=" + hmac.new(secret.encode(), f"v0:{ts}:".encode() + raw, hashlib.sha256).hexdigest()
+    return raw, {"X-Slack-Request-Timestamp": ts, "X-Slack-Signature": sig, "Content-Type": "application/json"}
+
+
+def test_slack_events_verify_the_signature_and_route_mentions(monkeypatch):
+    """MVP row 3: an app_mention in #ask-people-ops runs people-ops-bot."""
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", "test-secret")
+    ran = []
+    monkeypatch.setattr(api, "_run_from_slack", lambda name, payload: ran.append((name, payload)))
+    raw, headers = _signed({"type": "url_verification", "challenge": "abc"})
+    assert client.post("/v0/events/slack", content=raw, headers=headers).json() == {"challenge": "abc"}
+    raw, headers = _signed({"type": "url_verification", "challenge": "abc"}, secret="wrong")
+    assert client.post("/v0/events/slack", content=raw, headers=headers).status_code == 401
+    raw, headers = _signed({"type": "url_verification", "challenge": "abc"}, age=600)
+    assert client.post("/v0/events/slack", content=raw, headers=headers).status_code == 401   # replay
+    event = {"type": "event_callback", "event": {"type": "app_mention", "channel": "#ask-people-ops",
+                                                 "text": "<@bot> how many PTO days?", "user": "U1", "ts": "1.2"}}
+    raw, headers = _signed(event)
+    out = client.post("/v0/events/slack", content=raw, headers=headers).json()
+    assert out["agents"] == ["people-ops-bot"] and ran[0][0] == "people-ops-bot"
+    assert ran[0][1]["text"].endswith("how many PTO days?")
+    raw, headers = _signed({**event, "event": {**event["event"], "channel": "#random"}})
+    assert client.post("/v0/events/slack", content=raw, headers=headers).json()["agents"] == []

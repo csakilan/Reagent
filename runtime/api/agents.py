@@ -13,13 +13,14 @@ Visibility is filtered here, server-side; the dashboard renders what it gets.
 from __future__ import annotations
 
 import argparse
+import json
 import copy
 import os
 import re
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, Body, FastAPI, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from contracts.errors import Code, ReAgentError, Rejection
@@ -751,6 +752,97 @@ def post_meta_agent_run(name: str, body: dict[str, Any] = Body(...),
     r = run_agent(name, payload, user=user, trigger="http")
     keep = ("run_id", "status", "output", "error", "cost_usd", "steps", "model", "rejections")
     return {k: r.get(k) for k in keep if k in r}
+
+
+def _slack_signature_ok(secret: str, timestamp: str, body: bytes, signature: str) -> bool:
+    """Slack's v0 signing: HMAC-SHA256 of 'v0:<timestamp>:<body>' with the signing secret."""
+    import hashlib
+    import hmac
+    import time
+    try:
+        if abs(time.time() - int(timestamp)) > 300:          # replay window: 5 minutes
+            return False
+    except ValueError:
+        return False
+    mine = "v0=" + hmac.new(secret.encode(), f"v0:{timestamp}:".encode() + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(mine, signature or "")
+
+
+def _channel_name(channel: str) -> str:
+    """Slack events carry a channel ID; triggers name channels. Resolve through
+    REAGENT_SLACK_CHANNELS ('C0123=#ask-people-ops,...') or, live, conversations.info."""
+    if channel.startswith("#"):
+        return channel
+    for pair in os.environ.get("REAGENT_SLACK_CHANNELS", "").split(","):
+        cid, _, name = pair.partition("=")
+        if cid.strip() == channel and name.strip():
+            return name.strip()
+    token = os.environ.get("SLACK_BOT_TOKEN")
+    if token:
+        import httpx
+        try:
+            r = httpx.get("https://slack.com/api/conversations.info", params={"channel": channel},
+                          headers={"Authorization": f"Bearer {token}"}, timeout=3)
+            name = (r.json().get("channel") or {}).get("name")
+            if name:
+                return f"#{name}"
+        except httpx.HTTPError:
+            pass
+    return channel
+
+
+def slack_targets(cat: Catalog, event: str, channel: str) -> list[str]:
+    """Agents whose slack trigger listens for this event in this channel (globs allowed)."""
+    from runtime.resolver.globs import match_any
+    out = []
+    for name in sorted(cat.agents):
+        doc = cat.latest(name)
+        for t in doc.get("spec", {}).get("triggers") or []:
+            if (t.get("type") == "slack" and event in (t.get("events") or [])
+                    and match_any(channel, t.get("channels") or ["*"])):
+                out.append(name)
+                break
+    return out
+
+
+def _run_from_slack(name: str, payload: dict[str, Any]) -> None:
+    from runtime.engine import run_agent
+    # FROZEN D2: no session, so no acting user. on_behalf_of tools are refused
+    # with E_ON_BEHALF_OF_NO_USER; the run and its refusal are recorded as usual.
+    run_agent(name, payload, user=None, trigger="slack")
+
+
+@router.post("/events/slack", tags=["triggers"])
+async def post_slack_events(request: Request, background: BackgroundTasks):
+    """MVP row 3: the Slack Events API endpoint. Verifies Slack's signature, answers the
+    URL verification challenge, and runs every agent whose `slack` trigger matches an
+    app_mention. Runs happen in the background: Slack wants a reply within 3 seconds.
+    Not in contracts/openapi.yaml yet (reported)."""
+    body = await request.body()
+    secret = os.environ.get("SLACK_SIGNING_SECRET")
+    if not secret:
+        raise HTTPException(503, "SLACK_SIGNING_SECRET is not configured")
+    if not _slack_signature_ok(secret, request.headers.get("X-Slack-Request-Timestamp", ""), body,
+                               request.headers.get("X-Slack-Signature", "")):
+        raise HTTPException(401, "bad Slack signature")
+    try:
+        data = json.loads(body or b"{}")
+    except ValueError:
+        raise HTTPException(400, "not JSON")
+    if data.get("type") == "url_verification":
+        return {"challenge": data.get("challenge")}
+    if request.headers.get("X-Slack-Retry-Num"):
+        return {"ok": True, "ignored": "retry"}               # the first delivery already ran it
+    event = data.get("event") or {}
+    if data.get("type") != "event_callback" or event.get("type") != "app_mention":
+        return {"ok": True, "ignored": event.get("type") or data.get("type")}
+    channel = _channel_name(str(event.get("channel", "")))
+    targets = slack_targets(load_catalog(), "app_mention", channel)
+    payload = {"text": event.get("text", ""), "channel": channel, "user": event.get("user"),
+               "thread_ts": event.get("thread_ts") or event.get("ts")}
+    for name in targets:
+        background.add_task(_run_from_slack, name, payload)
+    return {"ok": True, "channel": channel, "agents": targets}
 
 
 def create_app() -> FastAPI:
