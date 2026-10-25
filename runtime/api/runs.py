@@ -17,6 +17,7 @@ served on its own:  uvicorn runtime.api.runs:app --port 8000
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as dt
 from typing import Any, Literal
 
@@ -303,7 +304,18 @@ async def get_metrics(team: str | None = None, agent: str | None = None,
     return JSONResponse(body, status_code=200)
 
 
-app = FastAPI(title="ReAgent runtime", version="0")
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Only a long-lived server may curate memory in the background: its event
+    loop outlives the request. (Setting REAGENT_MEMORY at import time leaked
+    into every test process that imported this module, and the background
+    tasks died with each asyncio.run, leaving curator runs stuck in 'running'.)"""
+    from runtime.engine import memory_curation
+    memory_curation.enable_background()
+    yield
+
+
+app = FastAPI(title="ReAgent runtime", version="0", lifespan=_lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(router)
 try:  # WF2's routes, when they exist

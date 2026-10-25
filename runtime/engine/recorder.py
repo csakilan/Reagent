@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -158,7 +159,8 @@ class Recorder:
             MEMORY[self.run_id] = {"id": self.run_id, "agent": agent, "version": version,
                                    "team": team, "parent_run_id": parent_run_id,
                                    "status": "running", "events": [], "cost_usd": 0.0,
-                                   "steps": 0, "trigger": trigger, "user": user}
+                                   "steps": 0, "trigger": trigger, "user": user,
+                                   "_t0": time.monotonic()}
             return self.run_id
         av_id, team_id = self._agent_version(agent, version, level, team, access, spec_doc)
         user_id = self._user_id(user)
@@ -207,6 +209,50 @@ class Recorder:
         row = self.db.execute("select status, cost_usd, steps, error from runs where id=%s",
                               (run_id,)).fetchone()
         return {"status": row[0], "cost_usd": float(row[1]), "steps": row[2], "error": row[3]}
+
+    def events(self, run_id: int) -> list[dict[str, Any]]:
+        """All run_events rows for a run, in seq order (already redacted)."""
+        if not self.db:
+            return [dict(e) for e in MEMORY.get(run_id, {}).get("events", [])]
+        self.flush()
+        rows = self.db.execute(
+            "select seq, type, action, allowed, payload_redacted from run_events"
+            " where run_id=%s order by seq", (run_id,)).fetchall()
+        return [{"seq": s, "type": t, "action": a, "allowed": al, "payload_redacted": p}
+                for s, t, a, al, p in rows]
+
+    def run_row(self, run_id: int) -> dict[str, Any]:
+        """The run's own row with its agent, team and user names."""
+        if not self.db:
+            r = MEMORY[run_id]
+            return {k: r.get(k) for k in ("agent", "version", "team", "user", "trigger", "status",
+                                          "cost_usd", "steps", "error", "parent_run_id")} | {
+                "id": run_id, "latency_ms": None, "team_id": None, "user_id": None}
+        row = self.db.execute(
+            "select r.id, a.name, av.version, t.name, u.name, r.trigger, r.status, r.cost_usd,"
+            " r.steps, r.error, r.parent_run_id, r.latency_ms, r.team_id, r.triggered_by"
+            " from runs r join agent_versions av on av.id=r.agent_version_id"
+            " join agents a on a.id=av.agent_id left join teams t on t.id=r.team_id"
+            " left join users u on u.id=r.triggered_by where r.id=%s", (run_id,)).fetchone()
+        if not row:
+            raise KeyError(f"run {run_id} not found")
+        keys = ["id", "agent", "version", "team", "user", "trigger", "status", "cost_usd",
+                "steps", "error", "parent_run_id", "latency_ms", "team_id", "user_id"]
+        d = dict(zip(keys, row))
+        d["cost_usd"] = float(d["cost_usd"] or 0)
+        return d
+
+    def team_spend_today(self, team: str, agent: str) -> float:
+        """What `agent` has cost `team` since midnight UTC (curation's daily cap)."""
+        if not self.db:
+            return sum(float(v["cost_usd"]) for v in MEMORY.values()
+                       if v.get("team") == team and v.get("agent") == agent)
+        row = self.db.execute(
+            "select coalesce(sum(r.cost_usd),0) from runs r join agent_versions av"
+            " on av.id=r.agent_version_id join agents a on a.id=av.agent_id"
+            " join teams t on t.id=r.team_id where t.name=%s and a.name=%s"
+            " and r.started_at >= date_trunc('day', now())", (team, agent)).fetchone()
+        return float(row[0])
 
     def children_cost(self, run_id: int) -> float:
         """Total cost of every descendant run (runs.cost_usd is own-cost only)."""
@@ -335,18 +381,24 @@ class Recorder:
                 return {"usd_month": sum(float(r["cost_usd"]) for r in rs),
                         # concurrency counts root runs only: a child shares its root's slot
                         "running": sum(r["status"] == "running" and not r.get("parent_run_id")
+                                       and time.monotonic() - r.get("_t0", time.monotonic()) < 900
                                        for r in rs)}
             return {"enterprise": agg(lambda r: True),
                     "team": agg(lambda r: team is not None and r["team"] == team),
                     "agent": agg(lambda r: r["agent"] == agent)}
-        # One round trip for all three layers.
+        # One round trip for all three layers. A run still 'running' after 15
+        # minutes is a dead process (no timeout is that long), so it does not
+        # hold a concurrency slot: crashed runs once locked platform-eng out. A run still marked 'running'
+        # after 15 minutes is a dead process (no timeout is that long), not a
+        # live run: counting it would let crashed runs lock a team out of its
+        # concurrency slots for good. Found on Tiger: 4 stuck rows, cap 5.
         row = self.db.execute(
             "select coalesce(sum(r.cost_usd),0),"
-            " count(*) filter (where r.status='running' and r.parent_run_id is null),"
+            " count(*) filter (where r.status='running' and r.parent_run_id is null and r.started_at > now() - interval '15 minutes' and r.started_at > now() - interval '15 minutes'),"
             " coalesce(sum(r.cost_usd) filter (where t.name=%s),0),"
-            " count(*) filter (where r.status='running' and r.parent_run_id is null and t.name=%s),"
+            " count(*) filter (where r.status='running' and r.parent_run_id is null and r.started_at > now() - interval '15 minutes' and r.started_at > now() - interval '15 minutes' and t.name=%s),"
             " coalesce(sum(r.cost_usd) filter (where a.name=%s),0),"
-            " count(*) filter (where r.status='running' and r.parent_run_id is null and a.name=%s)"
+            " count(*) filter (where r.status='running' and r.parent_run_id is null and r.started_at > now() - interval '15 minutes' and r.started_at > now() - interval '15 minutes' and a.name=%s)"
             " from runs r join agent_versions av on av.id=r.agent_version_id"
             " join agents a on a.id=av.agent_id left join teams t on t.id=r.team_id"
             # Every row, children included: each stores its own cost once.

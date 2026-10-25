@@ -51,6 +51,8 @@ def main() -> int:
                     help="default: $REAGENT_CONNECTORS or fake")
     ap.add_argument("--repo", default="nmc2/infra")
     ap.add_argument("--pr", type=int, default=42)
+    ap.add_argument("--memory", action="store_true",
+                    help="curate memory after each run (REAGENT_MEMORY=sync) and check it")
     ap.add_argument("--post", action="store_true",
                     help="with live connectors, approve and really post the comment")
     args = ap.parse_args()
@@ -61,6 +63,9 @@ def main() -> int:
     os.environ.setdefault("REAGENT_CONNECTORS", "fake")
     live_gh = os.environ["REAGENT_CONNECTORS"] == "live"
     target = {"repo": args.repo, "pr_number": args.pr}
+    if args.memory:
+        os.environ["REAGENT_MEMORY"] = "sync"
+        os.environ.setdefault("REAGENT_MEMORY_GATE", "off")  # gate is minutes; run it by hand
     if args.no_db:
         os.environ.pop("DATABASE_URL", None)
 
@@ -128,6 +133,13 @@ def main() -> int:
                 "select 1 from run_events where payload_redacted::text like %s"
                 " union all select 1 from approvals where args_redacted::text like %s limit 1",
                 (f"%{PLANTED[1]}%",) * 2).fetchone())
+    if os.environ.get("REAGENT_MEMORY") in ("sync", "async"):
+        mem = [e for e in events(r["run_id"]) if e["type"] == "metric"
+               and str((e["payload_redacted"] or {}).get("name", "")).startswith("memory_")]
+        written = sorted({m["payload_redacted"]["name"].split(".", 1)[-1] for m in mem
+                          if m["payload_redacted"]["name"].startswith("memory_written")})
+        check("memory curated after the run", any(m["payload_redacted"]["name"] == "memory_curated"
+                                                  for m in mem), f"wrote {', '.join(written) or 'nothing'}")
     check("planted secret in no output, trace or DB row",
           not any(k in blob for k in PLANTED) and not leak_db)
 

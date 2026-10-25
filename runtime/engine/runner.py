@@ -73,6 +73,12 @@ def load_resolved(name: str, *, root_team: str | None = None,
             try:
                 doc = resolve_agent(name, caller=None, root_team=root_team, trigger=trigger)
             except LookupError as e:
+                if name == "memory-curator":
+                    # Bridge until WF2 lands memory-curator.agent: platform
+                    # meta-agent, fixed config. Remove once the resolver knows it.
+                    log.warning("resolver has no memory-curator yet; using the runtime stand-in")
+                    from runtime.engine.fakes import resolved_spec
+                    return resolved_spec(name)
                 raise ReAgentError(Rejection(Code.SUBAGENT_NOT_CALLABLE, field="agent",
                                              blocked_by="registry", attempted=name)) from e
             if doc.get("rejections"):
@@ -124,12 +130,17 @@ class _Checkpointer:
             return InMemorySaver()
         if url:
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-            self._cm = AsyncPostgresSaver.from_conn_string(url)
-            saver = await self._cm.__aenter__()
+            # pipeline=True batches the saver's statements into fewer round
+            # trips; measured ~81 sequential statements per run, at ~90ms each
+            # to Tiger that was nearly the whole run.
             if not _Checkpointer._setup_done:
-                await saver.setup()
+                # setup() runs CREATE INDEX CONCURRENTLY, which Postgres refuses
+                # inside a pipeline, so it gets a plain connection, once.
+                async with AsyncPostgresSaver.from_conn_string(url) as plain:
+                    await plain.setup()
                 _Checkpointer._setup_done = True
-            return saver
+            self._cm = AsyncPostgresSaver.from_conn_string(url, pipeline=True)
+            return await self._cm.__aenter__()
         global _MEMORY_SAVER
         if _MEMORY_SAVER is None:
             from langgraph.checkpoint.memory import InMemorySaver
@@ -233,7 +244,9 @@ def _grants_for(spec: dict[str, Any], parent: ParentCtx | None) -> GrantSet:
 # --------------------------------------------------------------------------
 
 def _prerun_checks(spec: dict[str, Any], recorder: Recorder, grants: GrantSet,
-                   parent: ParentCtx | None, user: str | None, trigger: str) -> None:
+                   parent: ParentCtx | None, user: str | None, trigger: str, *,
+                   charge_team: str | None = None,
+                   charge_team_cap_usd: float | None = None) -> None:
     eff = spec["effective"]
     lim = eff.get("limits") or {}
     if parent is not None:
@@ -255,7 +268,15 @@ def _prerun_checks(spec: dict[str, Any], recorder: Recorder, grants: GrantSet,
     # FROZEN D7: aggregates, per layer, summed from runs. Root runs only: a
     # child's spend is part of its root run's.
     if parent is None:
-        usage = recorder.aggregate_usage(spec["agent"], spec.get("team"))
+        usage = recorder.aggregate_usage(spec["agent"], charge_team or spec.get("team"))
+        if charge_team and charge_team_cap_usd is not None:
+            spent = (usage.get("team") or {}).get("usd_month", 0.0)
+            if spent >= float(charge_team_cap_usd):
+                raise ReAgentError(Rejection(Code.AGGREGATE_BUDGET_EXCEEDED,
+                                             field="limits.usd_per_month",
+                                             blocked_by=f"team:{charge_team}",
+                                             attempted=round(spent, 4),
+                                             allowed=charge_team_cap_usd))
         for layer, agg in (eff.get("aggregate_limits") or {}).items():
             agg = agg or {}
             used = usage.get(layer) or {"usd_month": 0.0, "running": 0}
@@ -366,6 +387,11 @@ async def _finalise(built: _Built, spec: dict[str, Any], recorder: Recorder, ctx
         recorder.span_close(ctx.span_id, spec["agent"], parent=ctx.parent_span_id,
                             status=result["status"], cost_usd=round(cost, 6),
                             output=(result["output"] or "")[:8000], error=result["error"])
+    if result["status"] != "awaiting_approval" and ctx.depth == 0:
+        # Post-run memory curation. Decides for itself whether this run
+        # qualifies, and never raises into the run it is curating.
+        from runtime.engine.memory_curation import schedule_curation
+        await schedule_curation(result["run_id"], dict(ctx.connector_headers))
     return result
 
 
@@ -404,9 +430,14 @@ def _input_message(input: Any) -> dict[str, Any]:
 async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger: str = "http",
                      budget_override: dict[str, Any] | None = None,
                      _parent: ParentCtx | None = None,
-                     on_start: Any = None) -> dict[str, Any]:
+                     on_start: Any = None, charge_team: str | None = None,
+                     charge_team_cap_usd: float | None = None) -> dict[str, Any]:
     """`on_start(run_id)` fires once the runs row exists, so the API can answer
-    202 with a run id while the run carries on in the background."""
+    202 with a run id while the run carries on in the background.
+
+    `charge_team` (FROZEN D20): a meta-agent run is charged to the caller's team.
+    Its runs row carries that team, and it is refused when the team's monthly
+    cap (`charge_team_cap_usd`) is already spent."""
     try:
         spec = load_resolved(name, root_team=_parent.root_team if _parent else None,
                              trigger=trigger)
@@ -428,7 +459,8 @@ async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger:
     grants = _grants_for(spec, p)
     try:
         recorder.start_run(agent=spec["agent"], version=spec.get("version") or "0.0.0",
-                           level=spec.get("level") or "team", team=spec.get("team"),
+                           level=spec.get("level") or "team",
+                           team=charge_team or spec.get("team"),
                            access=spec.get("access"), trigger=trigger,
                            model=model_cfg.get("openrouter_model"),
                            parent_run_id=p.run_id if p else None, user=user)
@@ -436,18 +468,23 @@ async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger:
             on_start(recorder.run_id)
         root_span = recorder.span_open(spec["agent"], parent=p.span_id if p else None,
                                        agent=spec["agent"], version=spec.get("version"),
-                                       trigger=trigger)
+                                       trigger=trigger, input=input)
         ctx = RunCtx(run_id=recorder.run_id, span_id=root_span, depth=(p.depth + 1) if p else 0,
                      limit_usd=limit_usd, limit_steps=limit_steps, deadline=deadline,
                      root_permissions=p.root_permissions if p else grants.permissions(),
-                     root_team=p.root_team if p else spec.get("team"), user=user,
+                     root_team=p.root_team if p else (charge_team or spec.get("team")), user=user,
                      chain=(p.chain if p else ()) + (spec["agent"],),
                      parent_span_id=p.span_id if p else None,
                      connector_headers=(p.connector_headers if p else
                                         root_connector_headers(recorder)))
-        _prerun_checks(spec, recorder, grants, p, user, trigger)
+        _prerun_checks(spec, recorder, grants, p, user, trigger,
+                       charge_team=charge_team, charge_team_cap_usd=charge_team_cap_usd)
+        # Durable (Postgres) only when a pause could be resumed elsewhere. Eval
+        # and gate runs (trigger "system") never resume across processes, so an
+        # in-memory saver is safe and saves ~80 Tiger round trips per run.
         can_pause = any(g.requires_approval for g in grants.grants.values())
-        async with _Checkpointer(durable=can_pause) as saver:
+        durable = can_pause and trigger != "system"
+        async with _Checkpointer(durable=durable) as saver:
             built = await _build(spec, recorder, ctx, saver, grants)
             config = {"configurable": {"thread_id": f"run-{ctx.run_id}"},
                       "recursion_limit": max(25, (limit_steps or 25) * 4 + 10)}
@@ -536,6 +573,9 @@ async def adecide_approval(approval_id: int, decision: str = "approved",
         recorder.finish_run(status=status, cost_usd=float(prior.get("cost_usd") or 0.0),
                             input_tokens=0, output_tokens=0, steps=int(prior.get("steps") or 0),
                             error=f"{code.value}: {msg}")
+        # A refused action is an episode worth remembering too.
+        from runtime.engine.memory_curation import schedule_curation
+        await schedule_curation(appr["run_id"], {})
         return {"run_id": appr["run_id"], "status": status, "error": f"{code.value}: {msg}",
                 "approval_id": approval_id}
     finally:
