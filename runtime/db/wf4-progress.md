@@ -17,3 +17,14 @@
 - Required integration notes: runtime uses CONNECTOR_SHARED_SECRET HTTP bearer and root-run identity headers; demo repo scope must be updated by WF2 across all policy layers. Exact fake key AKIAIOSFODNN7EXAMPLE. See connectors/README.md.
 - Task 4: seed already live from H4; existing 13 offline seed/bootstrap tests pass. Rechecking live DB is blocked by sandbox DNS.
 - Task 5: Tiger hybrid search/fork/index enhancements deferred until core live H3 can be verified, per MVP-before-stretch rule.
+
+
+## Analytics follow-up (2026-10-25)
+
+- H3 was subsequently released by the user's normal-terminal launcher: real MCP PR read/redaction succeeded and all seven live checks passed, zero skips. Connector/bootstrap code was committed and pushed as dd4ef2f on wf/data.
+- Added runtime/db/analytics.py and ANALYTICS.md for the frozen GET /v0/metrics response. Uses server-derived user_id, SQL membership/ownership filters, inherited connector action visibility, and no raw trace payloads.
+- Ruling: use nearest-rank integer latency percentiles, UTC [from,to) windows, terminal-run success rates, distinct-run approval rates, latest non-null CI report per agent@version, and visible monthly team/agent budget caps. These choices fill undefined reporting details; enforcement remains runtime-owned. Costs if wrong are reporting-definition changes, not altered permissions.
+- Ruling: aggregate scoped scalar rows in Python for this hackathon dataset; SQL still performs tenant filtering. Memory scales with the requested window; move aggregation into SQL for production scale.
+- Verification: 17 analytics tests passed, exercising actual relational joins/filters and schema validation; full suite 77 passed, 35 skipped. Live Tiger check remains unavailable from sandbox (sanitized OperationalError), so no live PostgreSQL success claimed.
+- Fresh read-only review identified missing inherited/guardrail action-denial filtering; regression tests failed first and now pass. Author also added regressions for cross-team version ownership and multi-membership budget selection.
+- API/dashboard owners can wire get_metrics using ANALYTICS.md. No API/dashboard or frozen contracts were edited. Optional Tiger extensions/index/fork work remains deferred pending integrated demo verification.
