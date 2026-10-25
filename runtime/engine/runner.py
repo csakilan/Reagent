@@ -355,7 +355,11 @@ async def _finalise(built: _Built, spec: dict[str, Any], recorder: Recorder, ctx
         else:
             result.update(status="succeeded")
         result["output"] = recorder.redactor.redact_text(text)[0]  # belt and braces
-    recorder.finish_run(status=result["status"], cost_usd=cost, input_tokens=tokens_in,
+    # runs.cost_usd stores this run's OWN spend only. Each child has its own
+    # row, so storing the rollup too would count sub-agent cost twice in any
+    # SUM over runs (WF4 analytics, the monthly cap). The rollup is computed
+    # at read time: the result here, and GET /v0/runs/{id}.
+    recorder.finish_run(status=result["status"], cost_usd=own_cost, input_tokens=tokens_in,
                         output_tokens=tokens_out, steps=steps, error=result["error"],
                         output=result["output"])
     if result["status"] != "awaiting_approval":
@@ -485,10 +489,8 @@ async def _resume(approval: dict[str, Any], decision: str, recorder: Recorder) -
         config = {"configurable": {"thread_id": f"run-{run_id}"},
                   "recursion_limit": max(25, (lim.get("max_steps") or 25) * 4 + 10)}
         snap = await built.agent.aget_state(config)
-        # The child cost already rolled into runs.cost_usd; own cost lives in
-        # the checkpointed state, so only carry the difference.
-        ctx.child_cost_usd = max(0.0, float(prior.get("cost_usd") or 0.0)
-                                 - float(snap.values.get("cost_usd") or 0.0))
+        # Own cost lives in the checkpointed state; children have their own rows.
+        ctx.child_cost_usd = recorder.children_cost(run_id)
         answers = {}
         for intr in snap.interrupts:
             v = intr.value if isinstance(intr.value, dict) else {}

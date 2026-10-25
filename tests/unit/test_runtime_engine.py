@@ -154,3 +154,10 @@ def test_reasoning_models_get_no_temperature():
     from runtime.engine.binding import _rejects_temperature
     assert _rejects_temperature("openai/gpt-5-mini")
     assert not _rejects_temperature("qwen/qwen3-coder-30b-a3b-instruct")
+
+
+def test_server_tools_keeps_its_one_argument_signature():
+    """WF2's eval sandbox monkeypatches binding._server_tools(connector)."""
+    import inspect
+    from runtime.engine import binding
+    assert list(inspect.signature(binding._server_tools).parameters) == ["connector"]

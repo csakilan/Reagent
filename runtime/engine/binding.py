@@ -10,6 +10,7 @@ Default is fake so tests and the eval engine never burn credits by accident.
 """
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 from typing import Any
@@ -85,9 +86,18 @@ def wrapper_headers(connector: str, grants: GrantSet, identity: dict[str, str]) 
     return h
 
 
-async def _server_tools(connector: str, headers: dict[str, str] | None = None) -> list[BaseTool]:
+#: Headers for the wrapper call in progress. A contextvar rather than a second
+#: argument, because WF2's eval sandbox replaces _server_tools(connector) with
+#: a one-argument mock; changing the signature broke every sandboxed eval.
+_WRAPPER_HEADERS: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar(
+    "wrapper_headers", default={})
+
+
+async def _server_tools(connector: str) -> list[BaseTool]:
     """Everything the server exposes. Not filtered: there is no per-tool filter
-    in langchain-mcp-adapters, only per-server."""
+    in langchain-mcp-adapters, only per-server. Keep this signature: WF2's eval
+    sandbox monkeypatches it."""
+    headers = _WRAPPER_HEADERS.get()
     if connector_mode() != "live":
         from runtime.engine.fakes import fake_connector
         return fake_connector(connector)
@@ -115,7 +125,11 @@ async def load_tools(grants: GrantSet, identity: dict[str, str] | None = None) -
     by_connector: dict[str, list[BaseTool]] = {}
     for conn in sorted({g.connector for g in grants.grants.values()}):
         try:
-            by_connector[conn] = await _server_tools(conn, wrapper_headers(conn, grants, identity or {}))
+            token = _WRAPPER_HEADERS.set(wrapper_headers(conn, grants, identity or {}))
+            try:
+                by_connector[conn] = await _server_tools(conn)
+            finally:
+                _WRAPPER_HEADERS.reset(token)
         except Exception as e:  # noqa: BLE001
             from contracts.errors import Code, ReAgentError, Rejection
             leaf = _leaf(e)  # the MCP client wraps errors in TaskGroup exception groups

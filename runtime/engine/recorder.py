@@ -208,6 +208,18 @@ class Recorder:
                               (run_id,)).fetchone()
         return {"status": row[0], "cost_usd": float(row[1]), "steps": row[2], "error": row[3]}
 
+    def children_cost(self, run_id: int) -> float:
+        """Total cost of every descendant run (runs.cost_usd is own-cost only)."""
+        if not self.db:
+            kids = [k for k, v in MEMORY.items() if v.get("parent_run_id") == run_id]
+            return sum(float(MEMORY[k]["cost_usd"]) + self.children_cost(k) for k in kids)
+        row = self.db.execute(
+            "with recursive d(id) as (select id from runs where parent_run_id=%s"
+            " union all select r.id from runs r join d on r.parent_run_id=d.id)"
+            " select coalesce(sum(r.cost_usd),0) from runs r where r.id in (select id from d)",
+            (run_id,)).fetchone()
+        return float(row[0])
+
     def agent_for_run(self, run_id: int) -> tuple[str, str]:
         if not self.db:
             r = MEMORY[run_id]
@@ -321,21 +333,24 @@ class Recorder:
             def agg(pred):
                 rs = [r for r in MEMORY.values() if pred(r)]
                 return {"usd_month": sum(float(r["cost_usd"]) for r in rs),
-                        "running": sum(r["status"] == "running" for r in rs)}
+                        # concurrency counts root runs only: a child shares its root's slot
+                        "running": sum(r["status"] == "running" and not r.get("parent_run_id")
+                                       for r in rs)}
             return {"enterprise": agg(lambda r: True),
                     "team": agg(lambda r: team is not None and r["team"] == team),
                     "agent": agg(lambda r: r["agent"] == agent)}
         # One round trip for all three layers.
         row = self.db.execute(
             "select coalesce(sum(r.cost_usd),0),"
-            " count(*) filter (where r.status='running'),"
+            " count(*) filter (where r.status='running' and r.parent_run_id is null),"
             " coalesce(sum(r.cost_usd) filter (where t.name=%s),0),"
-            " count(*) filter (where r.status='running' and t.name=%s),"
+            " count(*) filter (where r.status='running' and r.parent_run_id is null and t.name=%s),"
             " coalesce(sum(r.cost_usd) filter (where a.name=%s),0),"
-            " count(*) filter (where r.status='running' and a.name=%s)"
+            " count(*) filter (where r.status='running' and r.parent_run_id is null and a.name=%s)"
             " from runs r join agent_versions av on av.id=r.agent_version_id"
             " join agents a on a.id=av.agent_id left join teams t on t.id=r.team_id"
-            " where r.started_at >= date_trunc('month', now()) and r.parent_run_id is null",
+            # Every row, children included: each stores its own cost once.
+            " where r.started_at >= date_trunc('month', now())",
             (team, team, agent, agent)).fetchone()
         return {"enterprise": {"usd_month": float(row[0]), "running": int(row[1])},
                 "team": {"usd_month": float(row[2]), "running": int(row[3])},
