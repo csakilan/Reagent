@@ -1,0 +1,77 @@
+"""H1 over HTTP: GET /resolved and POST /validate, filtered by the caller (SPEC.md §2)."""
+from __future__ import annotations
+
+import json
+import pathlib
+
+import pytest
+
+pytest.importorskip("fastapi")
+pytest.importorskip("httpx")
+from fastapi.testclient import TestClient  # noqa: E402
+from jsonschema import Draft202012Validator  # noqa: E402
+
+from runtime.api.agents import create_app  # noqa: E402
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+SCHEMA = json.loads((ROOT / "contracts" / "resolved_spec.schema.json").read_text())
+client = TestClient(create_app())
+
+
+def get(name, user):
+    return client.get(f"/v0/agents/{name}/resolved", headers={"X-ReAgent-User": user} if user else {})
+
+
+@pytest.mark.parametrize("name,user", [("pr-reviewer", "alice"), ("people-ops-bot", "dana"),
+                                       ("pr-reviewer", "frank")])
+def test_resolved_validates_against_the_contract(name, user):
+    r = get(name, user)
+    assert r.status_code == 200
+    assert not list(Draft202012Validator(SCHEMA).iter_errors(r.json()))
+
+
+def test_member_cannot_see_another_teams_agent_or_enterprise_configs():
+    assert get("people-ops-bot", "alice").status_code == 404
+    assert get("secret-scanner", "alice").status_code == 404
+    assert get("secret-scanner", "frank").status_code == 200
+
+
+def test_no_principal_is_refused():
+    assert get("pr-reviewer", None).status_code == 403
+
+
+def test_validate_returns_rejections_naming_the_field():
+    text = (ROOT / "spec/examples/agents/platform-eng/pr-reviewer.agent").read_text(encoding="utf-8")
+    ok = client.post("/v0/agents/pr-reviewer/validate", json={"spec": text},
+                     headers={"X-ReAgent-User": "alice"})
+    assert ok.status_code == 200 and ok.json() == {"valid": True, "rejections": []}
+    bad = client.post("/v0/agents/pr-reviewer/validate",
+                      json={"spec": text.replace("timeout_seconds: 240", "timeout_seconds: 1200")},
+                      headers={"X-ReAgent-User": "alice"})
+    body = bad.json()
+    assert body["valid"] is False
+    assert body["rejections"][0]["field"] == "spec.budget.timeout_seconds"
+    assert body["rejections"][0]["blocked_by"] == "enterprise"
+
+
+def test_publish_pipeline_over_http():
+    pytest.importorskip("langchain")
+    from runtime.publish import STORE
+    STORE.runs.clear()
+    H = {"X-ReAgent-User": "alice"}
+    r = client.post("/v0/agents/pr-reviewer/publish", headers=H)
+    assert r.status_code == 202 and r.json()["review_url"].endswith(f"run={r.json()['publish_run_id']}")
+    rid = r.json()["publish_run_id"]
+    assert client.post("/v0/agents/pr-reviewer/publish", headers=H).status_code == 409
+    assert client.post(f"/v0/publish-runs/{rid}/continue", headers=H).status_code == 409
+    dry = client.post(f"/v0/publish-runs/{rid}/cases/agent/never-merges/dry-run", headers=H).json()
+    assert dry["passed"] and dry["output"]["blocked_calls"] == ["github:pulls.merge"]
+    assert client.get(f"/v0/publish-runs/{rid}", headers={"X-ReAgent-User": "dana"}).status_code == 404
+    for c in client.get(f"/v0/publish-runs/{rid}", headers=H).json()["cases"]:
+        if c["decision"] is None:
+            ok = client.post(f"/v0/publish-runs/{rid}/cases/{c['case_id']}/review",
+                             json={"decision": "approve"}, headers=H)
+            assert ok.status_code == 200
+    done = client.post(f"/v0/publish-runs/{rid}/continue", headers=H).json()
+    assert done["status"] in ("failed", "succeeded") and done["stage"] in ("gate", "publish")
+    STORE.runs.clear()

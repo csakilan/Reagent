@@ -54,7 +54,7 @@ handoffs:
       001_init.sql applied and the seed script loaded: enterprise row, 3 teams,
       4 connectors, 4 models, 6+ agents with versions, and seeded run history.
     verify: "pytest tests/contract/test_db_schema.py -q"
-    status: pending
+    status: "ready"
     deadline: "2026-10-25T03:30:00-05:00"
     fallback: "Local Postgres in docker-compose running the same migration. Cloud becomes a connection-string swap."
 
@@ -67,7 +67,7 @@ handoffs:
       the rest) has been sent privately to all three other laptops, and each has
       confirmed it loads. Never committed, never in the shared repo.
     verify: "python scripts/doctor.py   # on EACH laptop: the .env check must be green"
-    status: pending
+    status: "ready"
     deadline: "2026-10-25T03:45:00-05:00"
     fallback: "Send DATABASE_URL and OPENROUTER_API_KEY alone; the GitHub and Slack values can follow later, since only wf/runtime needs them and only once H3 lands."
 
@@ -81,7 +81,7 @@ handoffs:
       with every value carrying its source layer, and a widening attempt returns
       a typed error from contracts/errors.py naming the field and blocking layer.
     verify: "pytest tests/contract/test_resolver_output.py -q"
-    status: pending
+    status: "ready"
     deadline: "2026-10-25T05:00:00-05:00"
     fallback: "fakes/resolver.py keeps serving the golden resolved specs. Demo step 4 (rules hold) is then at risk; escalate rather than silently fall back."
 
@@ -95,7 +95,7 @@ handoffs:
       and writes one runs row plus ordered run_events rows that validate against
       contracts/run_events.schema.json.
     verify: "pytest tests/contract/test_run_lifecycle.py -q"
-    status: pending
+    status: "ready"
     deadline: "2026-10-25T06:30:00-05:00"
     fallback: "fixtures/traces/*.json for the dashboard; the eval engine grades recorded traces instead of live runs."
 
@@ -122,7 +122,7 @@ handoffs:
       interval, pass^k, recall, false-alarm rate, safety pass rate, avg cost and
       p95 latency, and GET /v0/publish-runs/{id} returns all 7 stage results.
     verify: "pytest tests/contract/test_eval_report.py -q"
-    status: pending
+    status: "ready"
     deadline: "2026-10-25T07:30:00-05:00"
     fallback: "fixtures/eval_report.json and fixtures/publish_run.json. Publish screens render seeded data."
 
@@ -135,7 +135,7 @@ handoffs:
       writes an approvals row, and resumes to completion after
       POST /v0/approvals/{id} approves it.
     verify: "pytest tests/contract/test_approval_pause_resume.py -q"
-    status: pending
+    status: "ready"
     deadline: "2026-10-25T08:00:00-05:00"
     fallback: "fixtures/approvals.json. The queue screen renders seeded rows and approval is demoed as a state change only."
 
