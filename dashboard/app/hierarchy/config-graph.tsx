@@ -47,7 +47,18 @@ function DetailRows({ rows }: { rows: [string, ReactNode][] }) {
   return <dl className="graph-detail-rows">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? "Not set"}</dd></div>)}</dl>;
 }
 
-export default function ConfigGraph({ setup, initialAgent }: { setup: Setup; initialAgent?: string | null }) {
+/** Admins receive the enterprise's own agents; show them as a group beside the teams. */
+const ENTERPRISE_GROUP = "enterprise-agents";
+function withEnterpriseAgents(setup: Setup): Setup {
+  const own = (setup.enterprise as Enterprise & { agents?: Agent[] }).agents ?? [];
+  if (!own.length) return setup;
+  const group: Team = { name: ENTERPRISE_GROUP, description: "Agents that run at the enterprise level: meta-agents and services.",
+    source: "enterprise", members: [], approvers: [], prompt: "", models: {}, connectors: [], guardrails: [], limits: {}, memory: [], agents: own };
+  return { ...setup, teams: [...setup.teams, group] };
+}
+
+export default function ConfigGraph({ setup: given, initialAgent }: { setup: Setup; initialAgent?: string | null }) {
+  const setup = useMemo(() => withEnterpriseAgents(given), [given]);
   const { GRAPH_WIDTH, enterprisePoint, teamPoint, agentPoint } = useMemo(() => makeLayout(setup), [setup]);
   const E = setup.enterprise;
   const [selected, setSelected] = useState<Selection>(() => {
@@ -118,7 +129,7 @@ export default function ConfigGraph({ setup, initialAgent }: { setup: Setup; ini
   const selectedLayer = selected.kind === "enterprise" ? "Enterprise layer" : selected.kind === "team" ? "Team layer" : "Agent layer";
   return <><div className="hierarchy-workspace">
     <section className="graph-panel" aria-label="Configuration hierarchy graph">
-      <div className="graph-toolbar"><div><span className="crumb">Configuration hierarchy</span><div className="graph-count">1 enterprise <b>·</b> {setup.teams.length} teams <b>·</b> {setup.teams.reduce((n, team) => n + team.agents.length, 0)} agents</div></div><div className="camera-controls"><button type="button" aria-label="Zoom out" onClick={() => zoomAt(camera.zoom / 1.2)}>−</button><span>{Math.round(camera.zoom * 100)}%</span><button type="button" aria-label="Zoom in" onClick={() => zoomAt(camera.zoom * 1.2)}>+</button><button type="button" aria-label="Fit graph to view" onClick={fit}>Fit</button></div></div>
+      <div className="graph-toolbar"><div><span className="crumb">Configuration hierarchy</span><div className="graph-count">1 enterprise <b>·</b> {setup.teams.filter(t => t.source !== "enterprise").length} teams <b>·</b> {setup.teams.reduce((n, team) => n + team.agents.length, 0)} agents</div></div><div className="camera-controls"><button type="button" aria-label="Zoom out" onClick={() => zoomAt(camera.zoom / 1.2)}>−</button><span>{Math.round(camera.zoom * 100)}%</span><button type="button" aria-label="Zoom in" onClick={() => zoomAt(camera.zoom * 1.2)}>+</button><button type="button" aria-label="Fit graph to view" onClick={fit}>Fit</button></div></div>
       <div className="graph-viewport"><svg ref={svgRef} viewBox={`0 0 ${GRAPH_WIDTH} ${HEIGHT}`} className={`hierarchy-svg ${dragging ? "is-dragging" : ""}`} role="group" aria-label="Interactive enterprise, team, and agent hierarchy" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel}>
         <g className="camera-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
           {setup.teams.map((team, ti) => {
@@ -140,7 +151,7 @@ export default function ConfigGraph({ setup, initialAgent }: { setup: Setup; ini
             const tp = teamPoint(team, ti, setup.teams.length); const teamId = `team:${team.name}`; const teamSelection: Selection = { kind: "team", team };
             return <g key={teamId}>
               <g className={`graph-node team-node ${selectedId === teamId ? "is-selected" : ""}`} role="button" tabIndex={0} aria-label={`Select team ${team.name}`} aria-pressed={selectedId === teamId} onPointerDown={e => e.stopPropagation()} onClick={() => choose(teamSelection, tp)} onKeyDown={e => nodeKey(e, teamSelection, tp)}>
-                <rect x={tp.x - 122} y={tp.y - 50} width="244" height="100" rx="4" /><text className="node-kicker" x={tp.x} y={tp.y - 17} textAnchor="middle">TEAM LAYER</text><text className="node-name" x={tp.x} y={tp.y + 10} textAnchor="middle">{team.name}</text><text className="node-meta" x={tp.x} y={tp.y + 31} textAnchor="middle">{team.agents.length} AGENTS · {team.members.length} MEMBERS</text>
+                <rect x={tp.x - 122} y={tp.y - 50} width="244" height="100" rx="4" /><text className="node-kicker" x={tp.x} y={tp.y - 17} textAnchor="middle">{team.source === "enterprise" ? "ENTERPRISE AGENTS" : "TEAM LAYER"}</text><text className="node-name" x={tp.x} y={tp.y + 10} textAnchor="middle">{team.name}</text><text className="node-meta" x={tp.x} y={tp.y + 31} textAnchor="middle">{team.source === "enterprise" ? `${team.agents.length} AGENTS · NO TEAM LAYER` : `${team.agents.length} AGENTS · ${team.members.length} MEMBERS`}</text>
               </g>
               {team.agents.map((agent, ai) => {
                 const ap = agentPoint(team, ti, ai, setup.teams.length); const agentId = `agent:${team.name}:${agent.name}`; const agentSelection: Selection = { kind: "agent", team, agent };
@@ -176,7 +187,7 @@ export default function ConfigGraph({ setup, initialAgent }: { setup: Setup; ini
       {selected.kind === "agent" && <>
         <DetailSection title="Agent"><DetailRows rows={[["File", `${selected.agent.name}.agent · ${selected.agent.version}`], ["Purpose", selected.agent.purpose],
           ["Model", selected.agent.model], ["Tools", text(selected.agent.tools)], ["Budget", selected.agent.budget]]} /></DetailSection>
-        <p className="graph-locked">Its inheritance view, agent first, then {selected.team.name}, then the enterprise, is below the graph.</p>
+        <p className="graph-locked">Its inheritance view, agent first, then {selected.team.source === "enterprise" ? "" : `${selected.team.name}, then `}the enterprise, is below the graph.</p>
         <div className="toolbar"><Link className="button" href={`/agents/${selected.agent.name}/edit`}>Edit</Link><Link className="button" href={`/traces?agent=${selected.agent.name}`}>Run</Link></div>
       </>}
       <div className="graph-detail-foot">Read-only. Team and enterprise layers are edited by enterprise admins, and every change applies on each agent’s next run.</div>
