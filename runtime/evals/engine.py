@@ -156,12 +156,31 @@ def grade(case: dict[str, Any], trace: Trace, output_schema: dict[str, Any] | No
             "has_trajectory": any(k in checks for k in TRAJECTORY)}
 
 
+# Case runs kept for reuse, keyed by (spec key, case hash). In-process only: it
+# lets a pipeline reuse what ran during review; a restart simply runs them again.
+_CACHE: dict[tuple[str | None, str], list[tuple[dict[str, Any], Any]]] = {}
+
+
+def _spec_key(doc: dict[str, Any], k: int) -> str:
+    """Everything that changes how a case runs: the spec minus its case list, k, model mode."""
+    d = copy.deepcopy(doc)
+    (d.get("spec", {}).get("evaluation") or {}).pop("cases", None)
+    blob = json.dumps([d, k, os.environ.get("REAGENT_MODEL")], sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
 def run_evals(agent: str, runs_per_case: int | None = None, *, fake_model: bool | None = None,
               strip_mocks: list[str] | None = None, caller: str | None = None,
               overrides: dict[str, Any] | None = None, draft: dict[str, Any] | None = None,
               include_inherited: bool = True, case_ids: list[str] | None = None,
-              catalog: Any = None, mutants: bool = False) -> dict[str, Any]:
-    """Run an agent's suite and return an EvalReport (contracts/openapi.yaml)."""
+              catalog: Any = None, mutants: bool = False,
+              on_case: Any = None, cache: bool = False) -> dict[str, Any]:
+    """Run an agent's suite and return an EvalReport (contracts/openapi.yaml).
+
+    on_case(entry, done, total) is called as each case finishes, so a caller can show
+    results live. cache=True reuses a case's runs from an earlier call on the same
+    agent spec, case hash, runs-per-case and model mode (the publish pipeline pre-runs
+    cases while they are reviewed); an edited case has a new hash and runs again."""
     cat = catalog or load_catalog()
     doc = draft or cat.latest(agent)
     if doc is None:
@@ -201,15 +220,23 @@ def run_evals(agent: str, runs_per_case: int | None = None, *, fake_model: bool 
         return has_code_check(case) or bool(state and state["calibrated"])
 
     runs: list[tuple[dict[str, Any], dict[str, Any], Trace]] = []
+    use_cache = cache and not strip_mocks and not overrides
     with _model_mode(fake_model):
+        spec_key = _spec_key(doc, k) if use_cache else None
         for item in cases:
             gating = counts(item["case"])
             graded = []
-            for _ in range(k):
-                tr = run_once(resolved, item["case"], user, list(strip_mocks or []), item["origin"])
-                g = grade(item["case"], tr, output_schema, calib, cat)
+            hit = _CACHE.get((spec_key, item["case_hash"])) if use_cache else None
+            for idx in range(k):
+                if hit is not None:
+                    g, tr = hit[idx]
+                else:
+                    tr = run_once(resolved, item["case"], user, list(strip_mocks or []), item["origin"])
+                    g = grade(item["case"], tr, output_schema, calib, cat)
                 graded.append(g)
                 runs.append((item, g, tr))
+            if use_cache and hit is None:
+                _CACHE[(spec_key, item["case_hash"])] = [(g, t) for i, g, t in runs if i is item]
             mine = [t for i, _, t in runs if i is item]
             errors = [t.error for t in mine if t.error]
             passes = sum(1 for g in graded if g["passed"])
@@ -230,6 +257,8 @@ def run_evals(agent: str, runs_per_case: int | None = None, *, fake_model: bool 
                                 if item["origin"] == "inherited" and inherited_mock_mode() == "inert"
                                 else []),
             })
+            if on_case is not None:
+                on_case(report["cases"][-1], len(report["cases"]), len(cases))
 
     gate_runs = [(i, g, t) for i, g, t in runs if counts(i["case"])]
     n, p = len(gate_runs), sum(1 for _, g, _ in gate_runs if g["passed"])

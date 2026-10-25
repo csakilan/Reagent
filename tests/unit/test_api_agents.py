@@ -72,8 +72,12 @@ def test_publish_pipeline_over_http():
             ok = client.post(f"/v0/publish-runs/{rid}/cases/{c['case_id']}/review",
                              json={"decision": "approve"}, headers=H)
             assert ok.status_code == 200
-    done = client.post(f"/v0/publish-runs/{rid}/continue", headers=H).json()
+    assert client.post(f"/v0/publish-runs/{rid}/continue", headers=H).status_code == 202
+    from runtime.publish.live import wait_idle          # stages 5-7 run in the background
+    wait_idle()
+    done = client.get(f"/v0/publish-runs/{rid}", headers=H).json()
     assert done["status"] in ("failed", "succeeded") and done["stage"] in ("gate", "publish")
+    assert len(done["live"]["evals"]["cases"]) == len(done["report"]["cases"])   # shown as they finished
     STORE.runs.clear()
 
 

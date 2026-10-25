@@ -159,6 +159,8 @@ def test_cost_optimizer_runs_only_after_evals_and_compares_team_models(monkeypat
         if c["decision"] is None:
             client.post(f"/v0/publish-runs/{rid}/cases/{c['case_id']}/review", json={"decision": "approve"}, headers=A)
     client.post(f"/v0/publish-runs/{rid}/continue", headers=A)
+    from runtime.publish.live import wait_idle          # evals run in the background
+    wait_idle()
     out = client.post(f"/v0/publish-runs/{rid}/cost-check", headers=A).json()
     assert {o["model"] for o in out["options"]} == {"qwen-coder", "claude-sonnet", "gpt-mini"} and out["advice"]
     STORE.runs.clear()
