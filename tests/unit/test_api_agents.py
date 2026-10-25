@@ -75,3 +75,17 @@ def test_publish_pipeline_over_http():
     done = client.post(f"/v0/publish-runs/{rid}/continue", headers=H).json()
     assert done["status"] in ("failed", "succeeded") and done["stage"] in ("gate", "publish")
     STORE.runs.clear()
+
+
+def test_every_wf2_route_is_served_by_the_runtime_app():
+    """runtime/api/runs.py mounts `router` only. A second router would 404 on port 8000."""
+    pytest.importorskip("langchain")
+    from runtime.api.runs import app
+    from runtime.publish import STORE
+    STORE.runs.clear()
+    c, H = TestClient(app), {"X-ReAgent-User": "alice"}
+    assert c.get("/v0/agents/pr-reviewer/resolved", headers=H).status_code == 200
+    rid = c.post("/v0/agents/pr-reviewer/publish", headers=H).json()["publish_run_id"]
+    assert c.get(f"/v0/publish-runs/{rid}", headers=H).status_code == 200
+    assert c.post(f"/v0/publish-runs/{rid}/continue", headers=H).status_code == 409
+    STORE.runs.clear()

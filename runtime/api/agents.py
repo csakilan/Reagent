@@ -26,7 +26,9 @@ from runtime.resolver import load_catalog, resolve_agent
 from runtime.resolver.source import Catalog
 from runtime.resolver.validate import validate_draft_text
 
-router = APIRouter(prefix="/v0/agents", tags=["agents"])
+# ONE router for every wf/resolver route: the runtime app mounts `router` and
+# nothing else (runtime/api/runs.py), so a second router would never be served.
+router = APIRouter(prefix="/v0", tags=["agents"])
 
 
 def _principal(cat: Catalog, user: str | None) -> tuple[str, bool, str | None]:
@@ -47,7 +49,7 @@ def _visible(doc: dict[str, Any], is_admin: bool, team: str | None) -> bool:
     return md.get("level") == "team" and md.get("team") == team
 
 
-@router.get("/{name}/resolved")
+@router.get("/agents/{name}/resolved")
 def get_resolved(name: str, x_reagent_user: str | None = Header(default=None)):
     cat = load_catalog()                       # SPEC.md §1: re-read every layer, every time
     user, is_admin, team = _principal(cat, x_reagent_user)
@@ -60,7 +62,7 @@ def get_resolved(name: str, x_reagent_user: str | None = Header(default=None)):
     return out
 
 
-@router.post("/{name}/validate")
+@router.post("/agents/{name}/validate")
 def post_validate(name: str, body: dict[str, Any] = Body(...),
                   x_reagent_user: str | None = Header(default=None)):
     cat = load_catalog()
@@ -79,7 +81,7 @@ def post_validate(name: str, body: dict[str, Any] = Body(...),
     return validate_draft_text(text, cat)
 
 
-@router.post("/{name}/evals")
+@router.post("/agents/{name}/evals")
 def post_evals(name: str, body: dict[str, Any] | None = Body(default=None),
                x_reagent_user: str | None = Header(default=None)):
     """Runs the suite in the mocked sandbox. The model follows REAGENT_MODEL
@@ -105,7 +107,6 @@ def post_evals(name: str, body: dict[str, Any] | None = Body(default=None),
 
 
 # -- publish pipeline (SPEC.md §11) -------------------------------------------
-publish_router = APIRouter(prefix="/v0", tags=["publish"])
 DASHBOARD_URL = os.environ.get("REAGENT_DASHBOARD_URL", "http://localhost:3000")
 
 
@@ -126,7 +127,7 @@ def _run_for(run_id: int, cat: Catalog, user: str | None):
     return run
 
 
-@router.post("/{name}/publish", status_code=202, tags=["publish"])
+@router.post("/agents/{name}/publish", status_code=202, tags=["publish"])
 def post_publish(name: str, body: dict[str, Any] | None = Body(default=None),
                  x_reagent_user: str | None = Header(default=None)):
     """Starts a PIPELINE, not a publish. Stages 1-3 run now; stage 4 is a human."""
@@ -149,13 +150,13 @@ def post_publish(name: str, body: dict[str, Any] | None = Body(default=None),
             "run": view(run)}
 
 
-@publish_router.get("/publish-runs/{run_id}")
+@router.get("/publish-runs/{run_id}")
 def get_publish_run(run_id: int, x_reagent_user: str | None = Header(default=None)):
     from runtime.publish import view
     return view(_run_for(run_id, load_catalog(), x_reagent_user))
 
 
-@publish_router.post("/publish-runs/{run_id}/cases/{case_id:path}/review")
+@router.post("/publish-runs/{run_id}/cases/{case_id:path}/review")
 def post_review(run_id: int, case_id: str, body: dict[str, Any] = Body(...),
                 x_reagent_user: str | None = Header(default=None)):
     from runtime.publish import review, view
@@ -175,7 +176,7 @@ def post_review(run_id: int, case_id: str, body: dict[str, Any] = Body(...),
     return view(run)
 
 
-@publish_router.post("/publish-runs/{run_id}/cases/{case_id:path}/dry-run")
+@router.post("/publish-runs/{run_id}/cases/{case_id:path}/dry-run")
 def post_dry_run(run_id: int, case_id: str, x_reagent_user: str | None = Header(default=None)):
     """Runs one case once so the reviewer sees real (redacted) agent output."""
     from runtime.evals import run_evals
@@ -194,7 +195,7 @@ def post_dry_run(run_id: int, case_id: str, x_reagent_user: str | None = Header(
             "cost_usd": rep["total_cost"]}
 
 
-@publish_router.post("/publish-runs/{run_id}/continue", status_code=202)
+@router.post("/publish-runs/{run_id}/continue", status_code=202)
 def post_continue(run_id: int, x_reagent_user: str | None = Header(default=None)):
     """Continues to evals once every case is reviewed. Continuing is the author's
     acknowledgement of stage 2's advisory findings."""
@@ -211,7 +212,6 @@ def post_continue(run_id: int, x_reagent_user: str | None = Header(default=None)
 def create_app() -> FastAPI:
     app = FastAPI(title="ReAgent agents (wf/resolver)")
     app.include_router(router)
-    app.include_router(publish_router)
     return app
 
 
