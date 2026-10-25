@@ -1,6 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap');
 
-:root { color-scheme: light; --background:#faf9f7; --surface:#f2f0ec; --line:#d8d5ce; --ink:#1a1a18; --muted:#696761; --enterprise:#2f4858; --team:#2d6a62; --agent:#9a6b1f; --denied:#8c3a2b; }
+:root { color-scheme:dark; --background:#14151B; --surface:#21232C; --line:#5B6072; --ink:#F5F6F8; --muted:#A3A7B6; --enterprise:#4CBB61; --team:#94D9A2; --agent:#DDF3E1; --denied:#E5484D; --brand:#4CBB61; --pending:#F2B84B; --info:#4C9BE8; --green-50:#F0FAF2; --green-100:#DDF3E1; --green-300:#94D9A2; --green-500:#4CBB61; --green-700:#1F7A36; --green-900:#124A21; --ink-50:#F5F6F8; --ink-100:#E4E6EC; --ink-300:#A3A7B6; --ink-500:#5B6072; --ink-800:#21232C; --ink-900:#14151B; }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--background); color:var(--ink); font-family:'Manrope',Arial,sans-serif; }
 button, input { font:inherit; }
@@ -28,7 +28,8 @@ h1 { font-size:26px; line-height:1.2; letter-spacing:-.035em; margin:7px 0 5px; 
 .subtitle { color:var(--muted); font-size:13px; margin:0; }
 .toolbar { display:flex; gap:8px; align-items:center; }
 .select, .button { border:1px solid var(--line); border-radius:3px; background:transparent; padding:9px 12px; font-size:12px; }
-.button.primary { background:var(--ink); color:var(--background); border-color:var(--ink); }
+.button.primary { background:var(--brand); color:var(--ink-900); border-color:var(--brand); }
+.button.link-action { border-color:var(--info); color:var(--info); }
 .button:disabled { opacity:.55; cursor:default; }
 .meta-row { display:flex; gap:20px; color:var(--muted); font:11px 'IBM Plex Mono',monospace; padding:0 0 16px; }
 .meta-row strong { color:var(--ink); font-weight:500; }
@@ -43,7 +44,7 @@ h1 { font-size:26px; line-height:1.2; letter-spacing:-.035em; margin:7px 0 5px; 
 .gutter.team { color:var(--team); } .gutter.team button { background:var(--team); }
 .gutter.agent { color:var(--agent); } .gutter.agent button { background:var(--agent); }
 .yaml { padding:8px 16px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.6 'IBM Plex Mono',monospace; }
-.locked { color:var(--muted); font-style:italic; }
+.locked { color:var(--pending); font-style:italic; }
 .chain { margin:8px 16px 12px 168px; padding:12px 14px; background:var(--surface); border:1px solid var(--line); font-size:12px; }
 .chain-title { font:10px 'IBM Plex Mono',monospace; color:var(--muted); margin-bottom:9px; }
 .chain-item { display:grid; grid-template-columns:140px 1fr; padding:4px 0; border-top:1px solid var(--line); }
@@ -85,12 +86,13 @@ h1 { font-size:26px; line-height:1.2; letter-spacing:-.035em; margin:7px 0 5px; 
 .case-grid pre { white-space:pre-wrap;overflow-wrap:anywhere;max-height:130px;overflow:auto;font:10px/1.5 'IBM Plex Mono',monospace;color:var(--muted); }
 .case-grid b { font-size:10px;color:var(--muted);font-weight:500; }
 .verdict { display:inline-block;margin-top:8px;font:10px 'IBM Plex Mono',monospace; }
-.verdict.pass { color:var(--team); }.verdict.fail,.reject { color:var(--denied); }.verdict.pending { color:var(--agent); }
+.verdict.pass { color:var(--team); }.verdict.fail,.reject { color:var(--denied); }.verdict.pending { color:var(--pending); }
 .case-actions { display:flex;flex-wrap:wrap;align-content:start;gap:6px; }
 .case-editor { width:100%;min-height:120px;border:1px solid var(--line);background:transparent;padding:8px;font:10px 'IBM Plex Mono',monospace; }
 .topbar-tools .user-switch { margin:0;padding:0;border:0;display:flex;align-items:center;gap:7px;font:9px 'IBM Plex Mono',monospace; }
 .topbar-tools select { padding:5px 7px;border:1px solid var(--line);font-size:11px; }
 .agent-grid,.approval-grid { grid-template-columns:1fr 1.5fr 1fr .8fr;align-items:start;font-size:12px; }
+.agent-grid a { color:var(--info);text-decoration:none; }
 .agent-grid p,.approval-grid p { margin:6px 0;color:var(--muted);font-size:11px; }
 .editor-frame { border:1px solid var(--line);min-height:400px; }
 .editor-skeleton { min-height:400px; }
