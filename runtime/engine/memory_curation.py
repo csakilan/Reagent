@@ -63,6 +63,15 @@ INJECTION = re.compile(
     r"|\b(disable|turn off|bypass|skip)\b.{0,30}\b(approval|redaction|guardrail|review|check)"
     r"|\byou (must|should|are now)\b|\bsystem prompt\b|https?://|\bapprovals? (are|is) optional")
 
+#: Semantic memory is durable team knowledge, not an observation about one run.
+#: Found live: a real curator filled the notes bucket with "The pull request
+#: configures an S3 bucket..." facts, which belong in the episode instead.
+RUN_SPECIFIC = re.compile(
+    r"(?i)\b(this|that) (pull request|pr|run|diff|change|changeset|commit|review)s?\b"
+    r"|\bthe (pull request|pr|run|changeset|commit)\b"
+    r"|\bin the (changes|diff)\b|\b(was|were) (executed|run|called|reported)\b"
+    r"|\b(the )?(pr|run)\s*#?\d+\b")
+
 _TASKS: set[asyncio.Task] = set()
 
 
@@ -263,6 +272,8 @@ def validate_proposals(raw: dict[str, Any] | None, events: list[dict[str, Any]],
         conf = item.get("confidence")
         if why:
             out.dropped.append(("semantic", why))
+        elif RUN_SPECIFIC.search(fact):
+            out.dropped.append(("semantic", "run_specific"))
         elif not grounded:
             out.dropped.append(("semantic", "ungrounded"))
         elif not isinstance(conf, (int, float)) or conf < SEMANTIC_MIN_CONFIDENCE:

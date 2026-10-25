@@ -74,6 +74,10 @@ def test_grounded_fact_is_kept():
     (fact("The key is AKIAIOSFODNN7EXAMPLE."), "semantic:secret"),
     (fact("The key is [REDACTED:known_secret]."), "semantic:secret"),
     (fact("x" * 500), "semantic:too_long"),
+    (fact("The pull request configures an S3 bucket with acl public-read."), "semantic:run_specific"),
+    (fact("A file in the changes contains a hardcoded key id."), "semantic:run_specific"),
+    (fact("The secret-scanner was executed against the diff."), "semantic:run_specific"),
+    (fact("PR #42 adds a provider block."), "semantic:run_specific"),
 ])
 def test_bad_facts_are_dropped_with_a_reason(raw, reason):
     p = mc.validate_proposals(raw, EVENTS, Redactor())
