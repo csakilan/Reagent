@@ -1,0 +1,56 @@
+{
+ "agents": [
+  {
+   "name": "code-reviewer",
+   "version": "1.2.0",
+   "status": "published",
+   "team": "platform-eng",
+   "description": "General pull request reviewer for Platform Eng repos.",
+   "desired_outcome": "Reviews that catch real bugs and security issues with few false alarms.",
+   "tags": [
+    "code-review",
+    "github"
+   ],
+   "forked_from": null,
+   "pass_rate": null,
+   "production_success_rate": null,
+   "avg_cost_usd": null,
+   "runs_30d": null
+  },
+  {
+   "name": "people-ops-bot",
+   "version": "1.0.0",
+   "status": "published",
+   "team": "people-ops",
+   "description": "Answers HR and handbook questions in #ask-people-ops.",
+   "desired_outcome": "Most routine questions answered correctly within a minute; anything sensitive handed to a human.",
+   "tags": [
+    "slack",
+    "faq"
+   ],
+   "forked_from": null,
+   "pass_rate": null,
+   "production_success_rate": null,
+   "avg_cost_usd": null,
+   "runs_30d": null
+  },
+  {
+   "name": "pr-reviewer",
+   "version": "1.0.0",
+   "status": "published",
+   "team": "platform-eng",
+   "description": "Reviews every PR to the infra repos for bugs, Terraform misconfigurations and leaked secrets.",
+   "desired_outcome": "Every PR gets an accurate review before a human looks at it, and leaked secrets are always flagged.",
+   "tags": [
+    "code-review",
+    "github",
+    "security"
+   ],
+   "forked_from": "code-reviewer@1.2.0",
+   "pass_rate": null,
+   "production_success_rate": null,
+   "avg_cost_usd": null,
+   "runs_30d": null
+  }
+ ]
+}

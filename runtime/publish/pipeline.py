@@ -80,6 +80,16 @@ def _rej(code: Code, field: str, attempted: Any = None, layer: str = "default",
     return d
 
 
+
+def _env_runs() -> int | None:
+    raw = os.environ.get("REAGENT_PIPELINE_RUNS_PER_CASE", "").strip()
+    if not raw:
+        return None
+    n = int(raw)
+    if n < 1:
+        raise ValueError("REAGENT_PIPELINE_RUNS_PER_CASE must be >= 1")
+    return n
+
 @_persist
 def start(agent: str, started_by: str, draft: dict[str, Any] | None = None, *,
           store: MemoryStore = STORE, catalog: Any = None) -> dict[str, Any]:
@@ -204,6 +214,9 @@ def proceed(run_id: int, *, store: MemoryStore = STORE, catalog: Any = None,
         return _fail(run, "evals", gaps, store)
 
     # 5 evals: approved cases + inherited default_cases
+    # REAGENT_PIPELINE_RUNS_PER_CASE overrides the agent's runs_per_case for the
+    # pipeline only (a short live demo). The report records the number used.
+    runs_per_case = runs_per_case or _env_runs()
     report = run_evals(run["agent"], runs_per_case, draft=draft, catalog=cat, fake_model=fake_model)
     run["report"] = report
     _pass(run, "evals", pass_rate=report["pass_rate"])
