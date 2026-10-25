@@ -260,7 +260,9 @@ async def _finalise(built: _Built, spec: dict[str, Any], recorder: Recorder, ctx
     result: dict[str, Any] = {"run_id": ctx.run_id, "agent": spec["agent"],
                               "version": spec.get("version"), "cost_usd": round(cost, 6),
                               "steps": steps, "error": None, "output": None,
-                              "children": list(ctx.children)}
+                              "children": list(ctx.children), "input_tokens": tokens_in,
+                              "output_tokens": tokens_out,
+                              "model": built.model_cfg.get("openrouter_model")}
     interrupts = list(out.interrupts) if out is not None else []
     if drained:
         rej = Rejection(Code.TIMEOUT, field="limits.timeout_seconds", blocked_by="effective.limits",
@@ -306,7 +308,8 @@ async def _finalise(built: _Built, spec: dict[str, Any], recorder: Recorder, ctx
                         output=result["output"])
     if result["status"] != "awaiting_approval":
         recorder.span_close(ctx.span_id, spec["agent"], parent=ctx.parent_span_id,
-                            status=result["status"], cost_usd=round(cost, 6))
+                            status=result["status"], cost_usd=round(cost, 6),
+                            output=(result["output"] or "")[:8000], error=result["error"])
     return result
 
 
@@ -337,7 +340,10 @@ def _input_message(input: Any) -> dict[str, Any]:
 
 async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger: str = "http",
                      budget_override: dict[str, Any] | None = None,
-                     _parent: ParentCtx | None = None) -> dict[str, Any]:
+                     _parent: ParentCtx | None = None,
+                     on_start: Any = None) -> dict[str, Any]:
+    """`on_start(run_id)` fires once the runs row exists, so the API can answer
+    202 with a run id while the run carries on in the background."""
     try:
         spec = load_resolved(name)
     except ReAgentError as e:
@@ -362,6 +368,8 @@ async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger:
                            access=spec.get("access"), trigger=trigger,
                            model=model_cfg.get("openrouter_model"),
                            parent_run_id=p.run_id if p else None, user=user)
+        if on_start is not None:
+            on_start(recorder.run_id)
         root_span = recorder.span_open(spec["agent"], parent=p.span_id if p else None,
                                        agent=spec["agent"], version=spec.get("version"),
                                        trigger=trigger)

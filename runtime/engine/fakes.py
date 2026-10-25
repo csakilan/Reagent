@@ -217,7 +217,7 @@ class FakeChatModel(BaseChatModel):
         findings = []
         file = "unknown"
         for n, line in enumerate(str(text).replace("\\n", "\n").splitlines(), 1):
-            m = re.match(r"diff --git a/(\S+)", line)
+            m = re.search(r"diff --git a/(\S+)", line)
             if m:
                 file = m.group(1)
             kind = None
