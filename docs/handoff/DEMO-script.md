@@ -7,15 +7,23 @@ python scripts/demo_reset.py          # rebuilds the `demo` schema; never touche
 python scripts/demo_reset.py --check  # expect: teams 3, agents 9, runs 32, connector_requests 1
 ```
 
-Then restart the API against the demo schema. `DEMO_DATABASE_URL` is written to `.env`
-on the first reset:
+Then restart the API against the demo schema. It must get **all of `.env`** (the
+OpenRouter key, the GitHub App, the connector secret): without the key every live run
+fails with "Missing credentials". In PowerShell:
 
+```powershell
+foreach ($line in Get-Content .env) {
+  if ($line -match '^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$') { Set-Item -Path "Env:$($Matches[1])" -Value ($Matches[2].Trim().Trim("'").Trim('"')) }
+}
+$env:DATABASE_URL = $env:DEMO_DATABASE_URL
+foreach ($v in "PGHOST","PGPORT","PGUSER","PGPASSWORD","PGDATABASE","PGSSLMODE") { Remove-Item "Env:$v" -ErrorAction SilentlyContinue }
+$env:REAGENT_LAYERS="db"; $env:REAGENT_PUBLISH_STORE="db"; $env:REAGENT_MODEL="live"; $env:REAGENT_PIPELINE_RUNS_PER_CASE="1"
+python -m uvicorn runtime.api.runs:app --loop asyncio:SelectorEventLoop --port 8000
+# wrappers: python scripts/wrappers.py   dashboard: cd dashboard; npx next start -p 3000
 ```
-DATABASE_URL=$DEMO_DATABASE_URL REAGENT_LAYERS=db REAGENT_PUBLISH_STORE=db \
-  REAGENT_MODEL=live REAGENT_PIPELINE_RUNS_PER_CASE=1 \
-  python -m uvicorn runtime.api.runs:app --loop asyncio:SelectorEventLoop --port 8000
-# wrappers: python scripts/wrappers.py   dashboard: cd dashboard && npm run start
-```
+
+The `PG*` lines are removed because Postgres applies them on top of the URL. The
+`--loop` flag lets the runtime use Postgres on Windows.
 
 Restart the API after every reset: it holds database connections to the old schema.
 Run on the Mac: the runtime cannot use Postgres from Windows (WF1's event-loop issue).
