@@ -1,62 +1,106 @@
 "use client";
 
-import { useMemo, useState } from "react";
 import Link from "next/link";
-import memberFixture from "../fixtures/resolved/pr-reviewer.member.json";
-import adminFixture from "../fixtures/resolved/pr-reviewer.admin.json";
+import { Fragment, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { listAgents, resolvedAgent, type AgentSummary } from "../lib/api";
+import { recordedAgents, recordedResolved } from "../lib/fixtures";
+import { useDemoUser, useLive } from "../lib/live";
+import { flatten, layerName, layerOf, show, type Layer, type Leaf, type Resolved } from "../lib/resolved";
+import { Failure, Icon, PageHead, Rejections, Skeleton, SourceTag, when } from "./ui";
 
-type Leaf = { value: unknown; source: string; redacted?: boolean; narrowed_from?: unknown };
-type Resolved = { agent: string; version: string; level: string; team: string; resolved_at: string; caller: { user: string; team: string; is_enterprise_admin: boolean }; provenance: Record<string, unknown>; rejections: Array<{ code: string; field: string; blocked_by: string; message: string }> };
-type Row = { path: string; leaf: Leaf };
+const LAYERS: { id: Layer; label: string; rule: string }[] = [
+  { id: "enterprise", label: "Enterprise", rule: "Sets the outer limits" },
+  { id: "team", label: "Team", rule: "Narrows within enterprise" },
+  { id: "agent", label: "Agent", rule: "Asks within team" },
+];
 
-const fixtures: Record<string, Resolved> = { member: memberFixture as Resolved, admin: adminFixture as Resolved };
-const layerClass = (source: string) => source === "enterprise" ? "enterprise" : source.startsWith("team:") ? "team" : "agent";
-const sourceName = (source: string) => source === "agent" ? "Agent" : source.startsWith("team:") ? `Team · ${source.slice(5)}` : "Enterprise";
-
-function flatten(value: unknown, path = ""): Row[] {
-  if (Array.isArray(value)) return value.flatMap((item, index) => flatten(item, `${path}[${index}]`));
-  if (value && typeof value === "object") {
-    if ("source" in value && "value" in value && typeof value.source === "string") return [{ path, leaf: value as Leaf }];
-    return Object.entries(value).flatMap(([key, child]) => flatten(child, path ? `${path}.${key}` : key));
-  }
-  return [];
-}
-
-function display(value: unknown) {
-  if (typeof value === "string") return JSON.stringify(value);
-  const serialized = JSON.stringify(value);
-  return serialized === undefined ? "undefined" : serialized;
+function Lineage({ leaf }: { leaf: Leaf }) {
+  const parent = leaf.narrowed_from;
+  const parentValue = parent && (parent.value ?? parent.allow ?? parent.declared ?? (parent.deny !== undefined ? { deny: parent.deny } : undefined));
+  return <div className="lineage">
+    <div className="lineage-title">Lineage · lower layers may only tighten</div>
+    <ol>
+      {parent && <li>
+        <span className={`layer-tag layer-${layerOf(parent.from_layer)}`}><i />{layerName(parent.from_layer)}</span>
+        <span className="lineage-verb">allowed</span>
+        {parent.redacted ? <span className="locked-value">value hidden from this identity</span> : <code>{show(parentValue)}</code>}
+      </li>}
+      <li>
+        <span className={`layer-tag layer-${layerOf(leaf.source)}`}><i />{layerName(leaf.source)}</span>
+        <span className="lineage-verb">{parent ? "narrowed to" : "set"}</span>
+        {leaf.redacted ? <span className="locked-value">value hidden from this identity</span> : <code>{show(leaf.value)}</code>}
+      </li>
+    </ol>
+  </div>;
 }
 
 export default function ResolvedView() {
-  const [identity, setIdentity] = useState("member");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [showChain, setShowChain] = useState<string | null>(null);
-  const spec = fixtures[identity];
-  const rows = useMemo(() => flatten(spec.provenance), [spec]);
-  const rejections = spec.rejections;
+  const params = useSearchParams();
+  const router = useRouter();
+  const user = useDemoUser();
+  const agent = params.get("agent") ?? "pr-reviewer";
+  const [agents] = useLive<{ agents: AgentSummary[] }>(user && `agents:${user}`, () => listAgents(), { fallback: recordedAgents });
+  const [state] = useLive<Resolved>(user && `resolved:${user}:${agent}`, () => resolvedAgent(agent), { fallback: () => user ? recordedResolved(user, agent) : undefined });
+  const [filter, setFilter] = useState<Layer | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
 
-  return <div className="shell">
-    <aside className="rail">
-      <div className="brand">ReAgent<small>POLICY CONTROL PLANE</small></div>
-      <nav className="nav" aria-label="Main navigation">
-        <Link className="active" href="/">Resolved view</Link><Link href="/traces">Trace viewer</Link><Link href="/publish">Publish pipeline</Link><Link href="/agents">Collection</Link><Link href="/approvals">Approvals</Link>
-      </nav>
-      <label className="user-switch">DEMO IDENTITY<select aria-label="Demo identity" value={identity} onChange={(event) => { setIdentity(event.target.value); setSelected(null); setShowChain(null); }}><option value="member">Member · live + fixture</option><option value="admin">Admin · fixture preview</option></select></label>
-    </aside>
-    <main>
-      <header className="page-head"><div><div className="eyebrow">Policy / Resolution</div><h1>{spec.agent}</h1><p className="subtitle">Effective policy with field-level lineage</p></div><div className="toolbar"><button className="button" type="button" onClick={() => setIdentity(identity === "member" ? "admin" : "member")}>Compare identity</button><span className="example-origin">EXAMPLE · LOCAL ONLY</span></div></header>
-      <div className="example-banner">EXAMPLE DATA · LOCAL PREVIEW ONLY · Switch identity to compare the member and administrator fixtures.</div>
-      <div className="meta-row"><span>VERSION <strong>{spec.version}</strong></span><span>TEAM <strong>{spec.team}</strong></span><span>RESOLVED <strong>{spec.resolved_at}</strong></span></div>
-      {rejections.length > 0 && <section className="rejections" aria-label="Policy rejections"><div className="rejection-head"><span>Rejected policy changes</span></div>{rejections.map((item, index) => <div className="rejection" key={`${item.field}-${index}`}><div><strong>{item.field}</strong> · blocked by <strong>{item.blocked_by}</strong></div><div>{item.message}</div></div>)}</section>}
-      <div className="layer-key" aria-label="Provenance layers"><span className="key-item"><i className="key-dot" style={{ background: "var(--enterprise)" }} />Enterprise</span><span className="key-item"><i className="key-dot" style={{ background: "var(--team)" }} />Team</span><span className="key-item"><i className="key-dot" style={{ background: "var(--agent)" }} />Agent</span></div>
-      <section className="resolved" aria-label="Resolved policy">
-        <div className="resolved-head"><span>Source layer</span><span>Resolved document · {rows.length} policy values</span></div>
-        {rows.map(({ path, leaf }) => <div key={path}>
-          <div className="policy-row"><div className={`gutter ${layerClass(leaf.source)}`}><button type="button" aria-label={`Show lineage for ${path}`} onClick={() => { setSelected(path); setShowChain(showChain === path ? null : path); }} /><span>{sourceName(leaf.source)}</span></div><div className={`yaml ${leaf.redacted ? "locked" : ""}`}>{path}: {leaf.redacted ? "[locked · value hidden]" : display(leaf.value)}</div></div>
-          {showChain === path && selected === path && <div className="chain"><div className="chain-title">POLICY LINEAGE · {path}</div><div className="chain-item"><span>Source</span><span>{sourceName(leaf.source)}</span></div>{leaf.narrowed_from !== undefined && <div className="chain-item"><span>Narrowed from</span><code>{display(leaf.narrowed_from)}</code></div>}<div className="chain-item"><span>Effective value</span><span>{leaf.redacted ? "Enterprise value hidden for this identity" : display(leaf.value)}</span></div></div>}
-        </div>)}
+  const spec = state.phase === "ready" ? state.data : null;
+  const rows = useMemo(() => spec ? flatten(spec.provenance) : [], [spec]);
+  const counts = useMemo(() => Object.fromEntries(LAYERS.map(({ id }) => {
+    const mine = rows.filter(row => layerOf(row.leaf.source) === id);
+    return [id, { total: mine.length, locked: mine.filter(row => row.leaf.redacted).length }];
+  })) as Record<Layer, { total: number; locked: number }>, [rows]);
+  const visible = filter ? rows.filter(row => layerOf(row.leaf.source) === filter) : rows;
+  const names = agents.phase === "ready" ? agents.data.agents.map(item => item.name) : [agent];
+  const locked = rows.filter(row => row.leaf.redacted).length;
+
+  return <>
+    <PageHead crumb="Policy / Resolved view" title={<span className="mono-title">{agent}</span>}
+      subtitle={spec ? <>Version {spec.version} · {spec.level} agent{spec.team ? ` · ${spec.team}` : ""} · resolved {when(spec.resolved_at)} for <b>{spec.caller.user}</b>{spec.caller.is_enterprise_admin ? " (enterprise admin)" : ""}</> : "Every effective value, tagged with the layer it came from"}>
+      <SourceTag state={state} />
+      <label className="field-inline"><span>Agent</span>
+        <select className="select" value={agent} onChange={event => { setOpen(null); router.replace(`/?agent=${encodeURIComponent(event.target.value)}`); }}>
+          {[...new Set([agent, ...names])].map(name => <option key={name} value={name}>{name}</option>)}
+        </select>
+      </label>
+      <Link className="button" href={`/agents/${agent}/edit`}>Edit</Link>
+      <Link className="button" href={`/traces?agent=${agent}`}>Run</Link>
+    </PageHead>
+
+    {state.phase === "loading" && <Skeleton rows={12} columns={3} label="Resolving policy" />}
+    <Failure state={state} notFound={<><b>{agent}</b> is not visible to <b>{user}</b>. Members see only their own team&apos;s agents; the API returns the same 404 whether an agent is hidden or missing.</>} />
+
+    {spec && <>
+      <Rejections items={spec.rejections} title="This agent does not resolve" />
+      <div className="layer-strip" role="group" aria-label="Filter by source layer">
+        {LAYERS.map(layer => <button type="button" key={layer.id} aria-pressed={filter === layer.id} className={`layer-cell layer-${layer.id} ${filter === layer.id ? "is-on" : ""}`} onClick={() => setFilter(filter === layer.id ? null : layer.id)}>
+          <span className="layer-tag"><i />{layer.label}</span>
+          <strong>{counts[layer.id].total}</strong>
+          <small>{counts[layer.id].locked ? `${counts[layer.id].locked} hidden from you` : layer.rule}</small>
+        </button>)}
+        <div className="layer-cell layer-total"><span className="layer-tag">Resolved values</span><strong>{rows.length}</strong><small>{filter ? <button type="button" className="text-button" onClick={() => setFilter(null)}>Show all layers</button> : "Re-merged on every run"}</small></div>
+      </div>
+      {locked > 0 && <p className="hint"><Icon name="pending" /> {locked} enterprise values are redacted by the API for this identity. Each one keeps its layer tag so you can still see who owns it.</p>}
+
+      <section className="table resolved-table" aria-label="Resolved policy">
+        <div className="table-head"><span>Source</span><span>Field</span><span>Effective value</span></div>
+        {visible.map((row, index) => {
+          const first = index === 0 || visible[index - 1].section !== row.section;
+          const field = row.path.slice(row.section.length).replace(/^\./, "") || row.section;
+          const isOpen = open === row.path;
+          return <Fragment key={row.path}>
+            {first && <div className="table-section">{row.section}</div>}
+            <button type="button" className={`resolved-row ${isOpen ? "is-open" : ""}`} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : row.path)}>
+              <span className={`layer-tag layer-${layerOf(row.leaf.source)}`}><i />{layerName(row.leaf.source)}</span>
+              <code className="field-path">{field}{row.leaf.narrowed_from && <em title="Narrowed from a parent layer">narrowed</em>}</code>
+              <span className={`value ${row.leaf.redacted ? "locked-value" : ""}`}>{row.leaf.redacted ? "Hidden · enterprise value" : show(row.leaf.value)}</span>
+              <Icon name={isOpen ? "collapse" : "expand"} />
+            </button>
+            {isOpen && <Lineage leaf={row.leaf} />}
+          </Fragment>;
+        })}
       </section>
-    </main>
-  </div>;
+    </>}
+  </>;
 }

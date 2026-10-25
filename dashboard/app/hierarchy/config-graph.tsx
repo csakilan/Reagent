@@ -23,11 +23,6 @@ const agentPoint = (team: Team, teamIndex: number, agentIndex: number, teamCount
 const connect = (a: Point, b: Point) => `M ${a.x} ${a.y} C ${a.x} ${(a.y + b.y) / 2}, ${b.x} ${(a.y + b.y) / 2}, ${b.x} ${b.y}`;
 const text = (values: string[] | undefined) => values?.length ? values.join(" · ") : "Not specified in this example";
 
-function CameraIcon({ kind }: { kind: "plus" | "minus" | "fit" }) {
-  if (kind === "fit") return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4M2 2l4 4m8-4-4 4m4 4-4 4m-8 0 4-4" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>;
-  return <svg viewBox="0 0 16 16" aria-hidden="true"><path d={kind === "plus" ? "M8 3v10M3 8h10" : "M3 8h10"} fill="none" stroke="currentColor" strokeWidth="1.4" /></svg>;
-}
-
 function DetailSection({ title, inherited, children }: { title: string; inherited?: boolean; children: ReactNode }) {
   return <section className="graph-detail-section"><h3>{title}<span>{inherited ? "INHERITED" : "CONFIGURED HERE"}</span></h3>{children}</section>;
 }
@@ -98,7 +93,7 @@ export default function ConfigGraph() {
   const selectedLayer = selected.kind === "enterprise" ? "Enterprise layer" : selected.kind === "team" ? "Team layer" : "Agent layer";
   return <div className="hierarchy-workspace">
     <section className="graph-panel" aria-label="Configuration hierarchy graph">
-      <div className="graph-toolbar"><div><span className="eyebrow">Configuration hierarchy</span><div className="graph-count">1 enterprise <b>·</b> {exampleSetup.teams.length} teams <b>·</b> {exampleSetup.teams.reduce((n, team) => n + team.agents.length, 0)} agents</div></div><div className="camera-controls"><button type="button" aria-label="Zoom out" onClick={() => zoomAt(camera.zoom / 1.2)}><CameraIcon kind="minus" /></button><span>{Math.round(camera.zoom * 100)}%</span><button type="button" aria-label="Zoom in" onClick={() => zoomAt(camera.zoom * 1.2)}><CameraIcon kind="plus" /></button><button type="button" aria-label="Fit graph to view" onClick={fit}><CameraIcon kind="fit" /><span>Fit</span></button></div></div>
+      <div className="graph-toolbar"><div><span className="crumb">Configuration hierarchy</span><div className="graph-count">1 enterprise <b>·</b> {exampleSetup.teams.length} teams <b>·</b> {exampleSetup.teams.reduce((n, team) => n + team.agents.length, 0)} agents</div></div><div className="camera-controls"><button type="button" aria-label="Zoom out" onClick={() => zoomAt(camera.zoom / 1.2)}>−</button><span>{Math.round(camera.zoom * 100)}%</span><button type="button" aria-label="Zoom in" onClick={() => zoomAt(camera.zoom * 1.2)}>+</button><button type="button" aria-label="Fit graph to view" onClick={fit}>Fit</button></div></div>
       <div className="graph-viewport"><svg ref={svgRef} viewBox={`0 0 ${GRAPH_WIDTH} ${HEIGHT}`} className={`hierarchy-svg ${dragging ? "is-dragging" : ""}`} role="group" aria-label="Interactive enterprise, team, and agent hierarchy" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel}>
         <g className="camera-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
           {exampleSetup.teams.map((team, ti) => {
@@ -109,25 +104,23 @@ export default function ConfigGraph() {
             const branch = `M ${tp.x} ${tp.y + 50} V 500 M ${left} 500 H ${right}`;
             return <g key={`edges-${team.name}`}>
               <path id={`enterprise-${team.name}`} className="graph-edge graph-edge-enterprise" d={connect({ x: enterprisePoint.x, y: enterprisePoint.y + 58 }, { x: tp.x, y: tp.y - 51 })} />
-              <path className="graph-edge-flow graph-edge-flow-enterprise" d={connect({ x: enterprisePoint.x, y: enterprisePoint.y + 58 }, { x: tp.x, y: tp.y - 51 })} />
               <path className="graph-edge graph-edge-team" d={branch} />
-              <path className="graph-edge-flow graph-edge-flow-team" d={branch} />
-              {team.agents.map((agent, ai) => { const ap = agentPoints[ai]; const drop = `M ${ap.x} 500 V ${ap.y - 42}`; return <g key={`edge-${agent.name}`}><path className="graph-edge graph-edge-team" d={drop} /><path className="graph-edge-flow graph-edge-flow-team" d={drop} /></g>; })}
+              {team.agents.map((agent, ai) => { const ap = agentPoints[ai]; const drop = `M ${ap.x} 500 V ${ap.y - 42}`; return <path key={`edge-${agent.name}`} className="graph-edge graph-edge-team" d={drop} />; })}
             </g>;
           })}
           <g className={`graph-node enterprise-node ${selectedId === "enterprise" ? "is-selected" : ""}`} role="button" tabIndex={0} aria-label={`Select enterprise ${exampleSetup.enterprise.name}`} aria-pressed={selectedId === "enterprise"} onPointerDown={e => e.stopPropagation()} onClick={() => choose({ kind: "enterprise" }, enterprisePoint)} onKeyDown={e => nodeKey(e, { kind: "enterprise" }, enterprisePoint)}>
-            <rect x={enterprisePoint.x - 150} y={enterprisePoint.y - 57} width="300" height="114" rx="10" /><text className="node-kicker" x={enterprisePoint.x} y={enterprisePoint.y - 22} textAnchor="middle">ENTERPRISE LAYER</text><text className="node-name enterprise-name" x={enterprisePoint.x} y={enterprisePoint.y + 13} textAnchor="middle">{exampleSetup.enterprise.name}</text><text className="node-meta" x={enterprisePoint.x} y={enterprisePoint.y + 36} textAnchor="middle">GOVERNS ALL TEAMS</text>
+            <rect x={enterprisePoint.x - 150} y={enterprisePoint.y - 57} width="300" height="114" rx="4" /><text className="node-kicker" x={enterprisePoint.x} y={enterprisePoint.y - 22} textAnchor="middle">ENTERPRISE LAYER</text><text className="node-name enterprise-name" x={enterprisePoint.x} y={enterprisePoint.y + 13} textAnchor="middle">{exampleSetup.enterprise.name}</text><text className="node-meta" x={enterprisePoint.x} y={enterprisePoint.y + 36} textAnchor="middle">GOVERNS ALL TEAMS</text>
           </g>
           {exampleSetup.teams.map((team, ti) => {
             const tp = teamPoint(team, ti, exampleSetup.teams.length); const teamId = `team:${team.name}`; const teamSelection: Selection = { kind: "team", team };
             return <g key={teamId}>
               <g className={`graph-node team-node ${selectedId === teamId ? "is-selected" : ""}`} role="button" tabIndex={0} aria-label={`Select team ${team.name}`} aria-pressed={selectedId === teamId} onPointerDown={e => e.stopPropagation()} onClick={() => choose(teamSelection, tp)} onKeyDown={e => nodeKey(e, teamSelection, tp)}>
-                <rect x={tp.x - 122} y={tp.y - 50} width="244" height="100" rx="8" /><text className="node-kicker" x={tp.x} y={tp.y - 17} textAnchor="middle">TEAM LAYER</text><text className="node-name" x={tp.x} y={tp.y + 10} textAnchor="middle">{team.name}</text><text className="node-meta" x={tp.x} y={tp.y + 31} textAnchor="middle">{team.agents.length} AGENTS · {team.members.length} MEMBERS</text>
+                <rect x={tp.x - 122} y={tp.y - 50} width="244" height="100" rx="4" /><text className="node-kicker" x={tp.x} y={tp.y - 17} textAnchor="middle">TEAM LAYER</text><text className="node-name" x={tp.x} y={tp.y + 10} textAnchor="middle">{team.name}</text><text className="node-meta" x={tp.x} y={tp.y + 31} textAnchor="middle">{team.agents.length} AGENTS · {team.members.length} MEMBERS</text>
               </g>
               {team.agents.map((agent, ai) => {
                 const ap = agentPoint(team, ti, ai, exampleSetup.teams.length); const agentId = `agent:${team.name}:${agent.name}`; const agentSelection: Selection = { kind: "agent", team, agent };
                 return <g className={`graph-node agent-node ${selectedId === agentId ? "is-selected" : ""}`} key={agentId} role="button" tabIndex={0} aria-label={`Select agent ${agent.name}`} aria-pressed={selectedId === agentId} onPointerDown={e => e.stopPropagation()} onClick={() => choose(agentSelection, ap)} onKeyDown={e => nodeKey(e, agentSelection, ap)}>
-                  <rect x={ap.x - 105} y={ap.y - 42} width="210" height="84" rx="7" /><text className="node-kicker" x={ap.x} y={ap.y - 12} textAnchor="middle">AGENT · {agent.version}</text><text className="node-name agent-name" x={ap.x} y={ap.y + 13} textAnchor="middle">{agent.name}</text><text className="node-meta" x={ap.x} y={ap.y + 30} textAnchor="middle">{agent.model}</text>
+                  <rect x={ap.x - 105} y={ap.y - 42} width="210" height="84" rx="4" /><text className="node-kicker" x={ap.x} y={ap.y - 12} textAnchor="middle">AGENT · {agent.version}</text><text className="node-name agent-name" x={ap.x} y={ap.y + 13} textAnchor="middle">{agent.name}</text><text className="node-meta" x={ap.x} y={ap.y + 30} textAnchor="middle">{agent.model}</text>
                 </g>;
               })}
             </g>;
@@ -136,7 +129,7 @@ export default function ConfigGraph() {
       </svg><div className="graph-hint">Drag canvas to pan <span>·</span> Scroll to zoom <span>·</span> Select a node to inspect</div></div>
       <div className="graph-legend"><span><i className="legend-mark legend-enterprise" />Enterprise provenance</span><span><i className="legend-mark legend-team" />Team provenance</span><span><i className="legend-mark legend-agent" />Agent configuration</span></div>
     </section>
-    <aside className="graph-details" aria-live="polite"><header><div className="eyebrow">{selectedLayer}</div><h2>{selectedTitle}</h2><p>Example configuration · local fixture</p></header>
+    <aside className="graph-details" aria-live="polite"><header><div className="crumb">{selectedLayer}</div><h2>{selectedTitle}</h2><p>From spec/examples · the files this deployment was seeded with</p></header>
       {selected.kind === "enterprise" && <>
         <DetailSection title="Enterprise policy"><DetailRows rows={[["Administrators", text(exampleSetup.enterprise.admins)], ["System prompt", exampleSetup.enterprise.prompt], ["Allowed triggers", text(exampleSetup.enterprise.triggers)]]} /></DetailSection>
         <DetailSection title="Models and evaluation"><DetailRows rows={[["Model allowlist", text(exampleSetup.enterprise.models.allow)], ["Judge", `${exampleSetup.enterprise.evaluation.judge_model} · ${exampleSetup.enterprise.evaluation.votes} votes · ${(exampleSetup.enterprise.evaluation.min_agreement * 100).toFixed(0)}% minimum agreement`], ["Requirements", `${exampleSetup.enterprise.evaluation.min_cases} · tool coverage ${exampleSetup.enterprise.evaluation.tool_coverage ? "required" : "optional"}`]]} /></DetailSection>
@@ -157,7 +150,7 @@ export default function ConfigGraph() {
         <DetailSection title="Execution and memory"><DetailRows rows={[["Budget", selected.agent.budget], ["Triggers", text(selected.agent.triggers)], ["Memory", text(selected.agent.memory)]]} /></DetailSection>
         <DetailSection title="Evaluation, guardrails and observability"><DetailRows rows={[["Evaluation", text(selected.agent.evaluation)], ["Guardrails", text(selected.agent.guardrails)], ["Observability", text(selected.agent.observability)]]} /></DetailSection>
       </>}
-      <div className="graph-detail-foot">Display-only example configuration. Selecting a node changes focus and this panel only; no platform settings are written.</div>
+      <div className="graph-detail-foot">Read-only. Team and enterprise layers are edited by enterprise admins, and every change applies on each agent’s next run.</div>
     </aside>
   </div>;
 }

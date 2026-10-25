@@ -1,5 +1,5 @@
-import CollectionView from "../collection-view";
+import { redirect } from "next/navigation";
 
 export default function ExamplesPage() {
-  return <CollectionView />;
+  redirect("/hierarchy");
 }
