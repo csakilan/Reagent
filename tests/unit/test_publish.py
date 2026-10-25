@@ -150,3 +150,12 @@ def test_inherited_cases_are_not_member_reviewable(cat, store):
     assert inh["case"] is None and inh["decision"] == "approved"
     with pytest.raises(ReAgentError):
         review(run["id"], inh["case_id"], "approve", "alice", store=store)
+
+
+def test_pipeline_runs_per_case_can_be_shortened_for_a_demo(cat, store, monkeypatch):
+    monkeypatch.setenv("REAGENT_PIPELINE_RUNS_PER_CASE", "1")
+    run = start("pr-reviewer", "alice", draft(cat), store=store, catalog=cat)
+    approve_all(run, store)
+    run = proceed(run["id"], store=store, catalog=cat, fake_model=True)
+    assert run["report"]["runs_per_case"] == 1
+    assert all(c["runs"] == 1 for c in run["report"]["cases"])

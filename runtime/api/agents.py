@@ -95,7 +95,9 @@ def post_evals(name: str, body: dict[str, Any] | None = Body(default=None),
     if doc is None or not _visible(doc, is_admin, team):
         raise HTTPException(404, "not found")
     body = body or {}
-    runs = body.get("runs_per_case", 5)
+    # REAGENT_PIPELINE_RUNS_PER_CASE (the demo's one-run setting) also sets the
+    # default here, so the dashboard's Run evals button matches the pipeline.
+    runs = body.get("runs_per_case", int(os.environ.get("REAGENT_PIPELINE_RUNS_PER_CASE") or 5))
     if not isinstance(runs, int) or runs < 1:
         raise HTTPException(422, "runs_per_case must be an integer >= 1")
     report = run_evals(name, runs_per_case=runs, caller=user, catalog=cat,

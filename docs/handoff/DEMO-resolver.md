@@ -16,6 +16,7 @@ export REAGENT_API=http://localhost:8000 REAGENT_USER=alice
 | `REAGENT_PUBLISH_STORE` | `db` | Pipelines and published versions persist across restarts |
 | `REAGENT_MODEL` | `live` for the real run, `fake` to rehearse | A live publish spends credits (about $0.20) |
 | `REAGENT_INHERITED_MOCKS` | leave unset | Default `inert` is the team's decision on the D4 conflict |
+| `REAGENT_PIPELINE_RUNS_PER_CASE` | `1` | **Demo only.** Each eval case runs once instead of five times, so a live publish takes about a minute instead of six |
 
 Database mode needs a working `DATABASE_URL`. **The runtime cannot use Postgres
 on Windows** (WF1's async event-loop bug), so run the live demo on the Mac.
@@ -58,9 +59,18 @@ review every new or changed case here: http://localhost:3000/publish?run=1
 - Inherited enterprise cases arrive already approved; members see names and results only.
 - After review, `continue` runs evals, then the gate, then stage 7.
 
-**Timing.** A live publish runs 6 cases × 5 runs inside the pipeline: about
-**6 minutes** and $0.20 on qwen-coder. Start it before a segment that does not
-need it and come back. Under `REAGENT_MODEL=fake` the gate blocks at
+**Timing.** With `REAGENT_PIPELINE_RUNS_PER_CASE=1` a live publish runs each
+of the 6 cases once: roughly a minute and a few cents. The report shows
+`runs_per_case: 1`. Without it, 6 × 5 runs take about **6 minutes** and $0.20.
+
+**What to say on stage:** "For the demo each test runs once. In production every
+case runs five times, and the pass rate comes with a 95% confidence interval, so
+one lucky or unlucky run can't decide a publish."
+
+**The trade-off:** at one run per case the gate needs all 6 to pass (5 of 6 is
+0.83, below 0.9), so one flaky run blocks the publish. From the last live run,
+expect that roughly one time in three. If it happens, it is an honest
+demonstration of the gate doing its job. Under `REAGENT_MODEL=fake` the gate blocks at
 `pass_rate 0.83 < 0.9`, because WF1's fake model reads a top-level `diff` and
 misses the S3 issue in the real wrapper's `files[].diff` shape.
 
