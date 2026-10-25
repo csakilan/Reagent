@@ -1,0 +1,16 @@
+# WF1 runtime pins. Exact where docs/research/langchain.md says exact.
+langchain==1.4.7
+langchain-core==1.7.0
+langgraph==1.2.17
+langgraph-checkpoint==4.3.0
+langgraph-checkpoint-postgres==3.2.0
+langchain-mcp-adapters==0.3.2
+# Load-bearing: below 1.1.11 response_metadata["cost"] is silently dropped.
+langchain-openai>=1.1.11
+psycopg[binary,pool]>=3.2
+fastapi>=0.115
+uvicorn>=0.30
+httpx>=0.27
+pyyaml>=6
+jsonschema>=4.22
+pytest>=8
