@@ -129,7 +129,9 @@ class ToolExecutionMiddleware(AgentMiddleware):
             clean, hits = self.redactor.redact(result.content)
             self.recorder.redaction_hits(hits, "tool_result")
             result.content = clean
-            if result.status == "error" and error is None:
+            # MCP tool failures come back as content, not status="error".
+            if error is None and (result.status == "error"
+                                  or "Error executing tool" in _summary(clean, 400)):
                 error = _summary(clean, 200)
             summary = _summary(clean)
         else:

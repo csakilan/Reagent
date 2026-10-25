@@ -164,7 +164,7 @@ async def _build(spec: dict[str, Any], recorder: Recorder, ctx: RunCtx, checkpoi
     if prompt is None:
         raise ReAgentError(Rejection(Code.SCHEMA_INVALID, field="effective.prompt",
                                      blocked_by="resolver", attempted="null (redacted view)"))
-    tools = await load_tools(grants)
+    tools = await load_tools(grants, ctx.connector_headers)
     tools += make_agent_tools(eff.get("sub_agents") or [], ctx, recorder)
 
     has_tools = bool(tools)
@@ -190,6 +190,16 @@ async def _build(spec: dict[str, Any], recorder: Recorder, ctx: RunCtx, checkpoi
     agent = create_agent(model, tools=tools, system_prompt=prompt, middleware=middleware,
                          checkpointer=checkpointer, name=spec.get("agent"))
     return _Built(agent=agent, grants=grants, model_cfg=model_cfg)
+
+
+def root_connector_headers(recorder: Recorder) -> dict[str, str]:
+    """Trusted identity headers for the MCP wrappers, set by the runtime alone
+    and computed ONCE at the root run (connectors/README.md): the wrappers
+    check team membership and source run against these, so a child run
+    inherits its root's. Numeric database ids, omitted when unknown."""
+    h = {"X-Reagent-Run-ID": recorder.run_id, "X-Reagent-Team-ID": recorder.team_id,
+         "X-Reagent-User-ID": recorder.user_id}
+    return {k: str(v) for k, v in h.items() if v is not None}
 
 
 def tool_map_note(grants: GrantSet, sub_agents: list[dict[str, Any]]) -> str:
@@ -421,7 +431,9 @@ async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger:
                      root_permissions=p.root_permissions if p else grants.permissions(),
                      root_team=p.root_team if p else spec.get("team"), user=user,
                      chain=(p.chain if p else ()) + (spec["agent"],),
-                     parent_span_id=p.span_id if p else None)
+                     parent_span_id=p.span_id if p else None,
+                     connector_headers=(p.connector_headers if p else
+                                        root_connector_headers(recorder)))
         _prerun_checks(spec, recorder, grants, p, user, trigger)
         can_pause = any(g.requires_approval for g in grants.grants.values())
         async with _Checkpointer(durable=can_pause) as saver:
@@ -460,6 +472,7 @@ async def _resume(approval: dict[str, Any], decision: str, recorder: Recorder) -
                  deadline=time.monotonic() + float(lim.get("timeout_seconds") or 240),
                  root_permissions=grants.permissions(), root_team=spec.get("team"),
                  user=None, chain=(name,))
+    ctx.connector_headers = {"X-Reagent-Run-ID": str(run_id)}
     async with _Checkpointer() as saver:
         built = await _build(spec, recorder, ctx, saver, grants)
         config = {"configurable": {"thread_id": f"run-{run_id}"},

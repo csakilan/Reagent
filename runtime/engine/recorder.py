@@ -127,6 +127,8 @@ class Recorder:
     redactor: Redactor
     url: str | None = field(default_factory=database_url)
     run_id: int | None = None
+    team_id: int | None = None       # numeric ids, for the connector headers
+    user_id: int | None = None
     _seq: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -160,6 +162,7 @@ class Recorder:
             return self.run_id
         av_id, team_id = self._agent_version(agent, version, level, team, access, spec_doc)
         user_id = self._user_id(user)
+        self.team_id, self.user_id = team_id, user_id
         row = self.db.execute(
             "insert into runs (parent_run_id, agent_version_id, team_id, trigger, triggered_by, model)"
             " values (%s,%s,%s,%s,%s,%s) returning id",
