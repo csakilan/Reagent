@@ -130,12 +130,17 @@ class _Checkpointer:
             return InMemorySaver()
         if url:
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-            self._cm = AsyncPostgresSaver.from_conn_string(url)
-            saver = await self._cm.__aenter__()
+            # pipeline=True batches the saver's statements into fewer round
+            # trips; measured ~81 sequential statements per run, at ~90ms each
+            # to Tiger that was nearly the whole run.
             if not _Checkpointer._setup_done:
-                await saver.setup()
+                # setup() runs CREATE INDEX CONCURRENTLY, which Postgres refuses
+                # inside a pipeline, so it gets a plain connection, once.
+                async with AsyncPostgresSaver.from_conn_string(url) as plain:
+                    await plain.setup()
                 _Checkpointer._setup_done = True
-            return saver
+            self._cm = AsyncPostgresSaver.from_conn_string(url, pipeline=True)
+            return await self._cm.__aenter__()
         global _MEMORY_SAVER
         if _MEMORY_SAVER is None:
             from langgraph.checkpoint.memory import InMemorySaver
@@ -474,8 +479,12 @@ async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger:
                                         root_connector_headers(recorder)))
         _prerun_checks(spec, recorder, grants, p, user, trigger,
                        charge_team=charge_team, charge_team_cap_usd=charge_team_cap_usd)
+        # Durable (Postgres) only when a pause could be resumed elsewhere. Eval
+        # and gate runs (trigger "system") never resume across processes, so an
+        # in-memory saver is safe and saves ~80 Tiger round trips per run.
         can_pause = any(g.requires_approval for g in grants.grants.values())
-        async with _Checkpointer(durable=can_pause) as saver:
+        durable = can_pause and trigger != "system"
+        async with _Checkpointer(durable=durable) as saver:
             built = await _build(spec, recorder, ctx, saver, grants)
             config = {"configurable": {"thread_id": f"run-{ctx.run_id}"},
                       "recursion_limit": max(25, (limit_steps or 25) * 4 + 10)}

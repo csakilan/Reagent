@@ -22,6 +22,7 @@ slack) whose team owns buckets. Eval runs and meta-agents use trigger
 Modes, REAGENT_MEMORY:  off (default) | sync | async
   sync   curate before run_agent returns (CLI, tests, rehearsal)
   async  background task; for the long-lived API process
+  default: async inside the API server (enable_background), off elsewhere
 REAGENT_MEMORY_GATE: auto (default) | off   run the procedural gate after curation.
 
 Every outcome is a `metric` run_events row on the SOURCE run, so the trace
@@ -75,8 +76,21 @@ RUN_SPECIFIC = re.compile(
 _TASKS: set[asyncio.Task] = set()
 
 
+_BACKGROUND = False
+
+
+def enable_background() -> None:
+    """Called by the API server at startup: default to async curation there."""
+    global _BACKGROUND
+    _BACKGROUND = True
+
+
 def mode() -> str:
-    return os.environ.get("REAGENT_MEMORY", "off").strip().lower()
+    """REAGENT_MEMORY wins; otherwise async inside the API server, off elsewhere.
+    async needs an event loop that outlives the run, which asyncio.run (CLI,
+    tests, run_agent) does not have, so it is never the default there."""
+    env = os.environ.get("REAGENT_MEMORY", "").strip().lower()
+    return env or ("async" if _BACKGROUND else "off")
 
 
 def gate_mode() -> str:

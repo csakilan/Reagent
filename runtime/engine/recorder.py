@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -158,7 +159,8 @@ class Recorder:
             MEMORY[self.run_id] = {"id": self.run_id, "agent": agent, "version": version,
                                    "team": team, "parent_run_id": parent_run_id,
                                    "status": "running", "events": [], "cost_usd": 0.0,
-                                   "steps": 0, "trigger": trigger, "user": user}
+                                   "steps": 0, "trigger": trigger, "user": user,
+                                   "_t0": time.monotonic()}
             return self.run_id
         av_id, team_id = self._agent_version(agent, version, level, team, access, spec_doc)
         user_id = self._user_id(user)
@@ -379,18 +381,24 @@ class Recorder:
                 return {"usd_month": sum(float(r["cost_usd"]) for r in rs),
                         # concurrency counts root runs only: a child shares its root's slot
                         "running": sum(r["status"] == "running" and not r.get("parent_run_id")
+                                       and time.monotonic() - r.get("_t0", time.monotonic()) < 900
                                        for r in rs)}
             return {"enterprise": agg(lambda r: True),
                     "team": agg(lambda r: team is not None and r["team"] == team),
                     "agent": agg(lambda r: r["agent"] == agent)}
-        # One round trip for all three layers.
+        # One round trip for all three layers. A run still 'running' after 15
+        # minutes is a dead process (no timeout is that long), so it does not
+        # hold a concurrency slot: crashed runs once locked platform-eng out. A run still marked 'running'
+        # after 15 minutes is a dead process (no timeout is that long), not a
+        # live run: counting it would let crashed runs lock a team out of its
+        # concurrency slots for good. Found on Tiger: 4 stuck rows, cap 5.
         row = self.db.execute(
             "select coalesce(sum(r.cost_usd),0),"
-            " count(*) filter (where r.status='running' and r.parent_run_id is null),"
+            " count(*) filter (where r.status='running' and r.parent_run_id is null and r.started_at > now() - interval '15 minutes' and r.started_at > now() - interval '15 minutes'),"
             " coalesce(sum(r.cost_usd) filter (where t.name=%s),0),"
-            " count(*) filter (where r.status='running' and r.parent_run_id is null and t.name=%s),"
+            " count(*) filter (where r.status='running' and r.parent_run_id is null and r.started_at > now() - interval '15 minutes' and r.started_at > now() - interval '15 minutes' and t.name=%s),"
             " coalesce(sum(r.cost_usd) filter (where a.name=%s),0),"
-            " count(*) filter (where r.status='running' and r.parent_run_id is null and a.name=%s)"
+            " count(*) filter (where r.status='running' and r.parent_run_id is null and r.started_at > now() - interval '15 minutes' and r.started_at > now() - interval '15 minutes' and a.name=%s)"
             " from runs r join agent_versions av on av.id=r.agent_version_id"
             " join agents a on a.id=av.agent_id left join teams t on t.id=r.team_id"
             # Every row, children included: each stores its own cost once.
