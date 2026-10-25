@@ -67,7 +67,7 @@ they know to re-check.
 Every merge rule in `SPEC.md` section 1 gets its own unit test. The rules are
 literally a table, so there is no excuse for skipping any, and the demo turns on
 two of them visibly: adding a GitHub merge action must be rejected while naming
-the team that never granted it, and a 900-second timeout must be rejected while
+the team that never granted it, and a 2300-second timeout must be rejected while
 naming the enterprise limit. The exact wording of both errors is already fixed in
 `contracts/errors.py` and goes on screen word for word.
 

@@ -405,14 +405,16 @@ class Resolution:
                     continue
                 for a in hit:
                     perm = f"{c}:{a}"
-                    d = self.denied(c, a)
-                    if d is not None:                            # D13: deny beats allow
-                        self.reject(Code.DENIED_ACTION, afield, d[1], attempted=perm, allowed=d[0])
-                        continue
+                    # Both refusals are reported when both apply, the missing grant
+                    # first: it names the layer that never allowed the action at all.
                     blocker = next((s for s in scopes if a not in s.grants[c]["actions"]), None)
                     if blocker is not None:
                         self.reject(Code.ACTION_NOT_GRANTED, afield, blocker.layer, attempted=perm,
                                     allowed=[f"{c}:{x}" for x in blocker.grants[c]["allow"]])
+                    d = self.denied(c, a)
+                    if d is not None:                            # D13: deny beats allow
+                        self.reject(Code.DENIED_ACTION, afield, d[1], attempted=perm, allowed=d[0])
+                    if blocker is not None or d is not None:
                         continue
                     res = self._resources_for(c, a, own_res, scopes, layer, path, reg)
                     if res is None:

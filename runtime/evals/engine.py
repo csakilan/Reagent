@@ -87,12 +87,12 @@ def _model_mode(fake_model: bool | None) -> Iterator[None]:
 
 
 def inherited_mock_mode() -> str:
-    """FROZEN D4 fails any unmocked call. The enterprise's default_cases carry no
-    mocks, so strictly every tool-using agent fails them and none can publish.
-    That conflict is for a human to settle; until then the strict rule holds.
-    REAGENT_INHERITED_MOCKS=inert answers an INHERITED case's unmocked calls with
-    an empty result instead, and the report lists every action it did that for."""
-    return os.environ.get("REAGENT_INHERITED_MOCKS", "strict").lower()
+    """FROZEN D4 fails any unmocked call, but the enterprise's default_cases carry
+    no mocks: they are written once for every agent and cannot know its tools.
+    Decided by the team (option b): an INHERITED case's unmocked calls get an
+    empty result, and the report lists each one in `inert_mocks`. An agent's own
+    cases stay strict. REAGENT_INHERITED_MOCKS=strict restores the literal rule."""
+    return os.environ.get("REAGENT_INHERITED_MOCKS", "inert").lower()
 
 
 def inert_mocks(resolved: dict[str, Any]) -> dict[str, Any]:
@@ -216,7 +216,11 @@ def run_evals(agent: str, runs_per_case: int | None = None, *, fake_model: bool 
         "p95_latency_unit": "ms",
         "total_cost": round(sum(t.cost_usd for _, _, t in runs), 6),
     })
-    report.update(gate(report, ev.get("thresholds") or {}, n))
+    # D8 + D9: only the agent's OWN cases can make a suite gateable. Inherited
+    # default_cases always carry code checks, so counting them would let a
+    # judge-only suite publish on the enterprise's tests alone.
+    own_gating = sum(1 for i, _, _ in gate_runs if i["origin"] != "inherited")
+    report.update(gate(report, ev.get("thresholds") or {}, own_gating))
     if mutants:
         report["mutation_score"] = None
         report["gate_reasons"].append("mutation testing is cut (CLAUDE.md §12, item 5)")

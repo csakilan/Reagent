@@ -63,7 +63,8 @@
         "source": "agent",
         "narrowed_from": {
           "actions": [
-            "pulls.*",
+            "pulls.read",
+            "pulls.comment",
             "issues.*",
             "contents.read"
           ],

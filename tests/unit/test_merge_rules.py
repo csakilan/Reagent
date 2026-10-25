@@ -80,7 +80,7 @@ def test_row1_team_element_matching_nothing_in_parent_fails_not_dropped(cat):
     doc = resolve(cat, agent(cat, "pr-reviewer"))
     r = the(doc, "E_WIDEN_ALLOWLIST")
     assert r["blocked_by"] == "enterprise"
-    assert r["field"] == "teams/platform-eng.spec.connectors.github.allow[1]"   # issues.*
+    assert r["field"] == "teams/platform-eng.spec.connectors.github.allow[2]"   # issues.*
 
 
 def test_row1_intersection_is_across_all_three_layers_not_last_wins(cat):
@@ -144,7 +144,8 @@ def test_row2_denylist_unions_both_forms_across_layers(cat):
 
 
 def test_row2_deny_beats_allow(cat):
-    """platform-eng allows pulls.*; the agent's own deny still wins."""
+    """With pulls.* granted, the agent's own deny still wins."""
+    team(cat)["connectors"]["github"]["allow"] = ["pulls.*"]
     a = agent(cat, "pr-reviewer")
     a["spec"]["tools"][0]["actions"].append("pulls.merge")
     r = the(resolve(cat, a), "E_DENIED_ACTION")
@@ -605,3 +606,17 @@ def test_provenance_and_effective_agree(cat, name):
             assert flat[k]["value"] == v
     assert sorted({d["value"] for d in doc["provenance"]["guardrails"].get("deny", [])}) == \
         doc["effective"]["denylist"]
+
+
+def test_demo_step_4_errors_name_the_layers_the_script_says(cat):
+    """The two on-screen refusals, exactly as the demo will show them."""
+    a = agent(cat, "pr-reviewer")
+    a["spec"]["budget"]["timeout_seconds"] = 2300
+    r = the(resolve(cat, a), "E_LIMIT_ABOVE_PARENT")
+    assert r["message"].startswith("spec.budget.timeout_seconds is 2300, above the limit of 900 "
+                                   "set by enterprise.")
+    a = agent(cat, "pr-reviewer")
+    a["spec"]["tools"][0]["actions"].append("pulls.merge")
+    first = resolve(cat, a)["rejections"][0]
+    assert first["code"] == "E_ACTION_NOT_GRANTED" and first["blocked_by"] == "team:platform-eng"
+    assert first["message"].startswith("github:pulls.merge is not granted to this team.")
