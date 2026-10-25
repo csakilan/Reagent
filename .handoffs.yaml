@@ -81,7 +81,7 @@ handoffs:
       with every value carrying its source layer, and a widening attempt returns
       a typed error from contracts/errors.py naming the field and blocking layer.
     verify: "pytest tests/contract/test_resolver_output.py -q"
-    status: pending
+    status: "ready"
     deadline: "2026-10-25T05:00:00-05:00"
     fallback: "fakes/resolver.py keeps serving the golden resolved specs. Demo step 4 (rules hold) is then at risk; escalate rather than silently fall back."
 
