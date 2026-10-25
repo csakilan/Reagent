@@ -12,7 +12,7 @@ A `user` field in the body is rejected by the schema, not ignored.
 
 `router` is what a shared app should include. `app` is a standalone app that
 also mounts WF2's runtime.api.agents router if it exists, so this file can be
-served on its own:  uvicorn runtime.api.runs:app --port 8000
+served on its own:  uvicorn runtime.api.runs:app --loop asyncio:SelectorEventLoop --port 8000
 """
 from __future__ import annotations
 

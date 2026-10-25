@@ -12,6 +12,7 @@ Each returns a dict with at least run_id and status
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import Any
 
 from runtime.engine.runner import aexpire_approval, adecide_approval, arun_agent
@@ -20,15 +21,26 @@ __all__ = ["run_agent", "decide_approval", "expire_approval",
            "arun_agent", "adecide_approval", "aexpire_approval"]
 
 
+def _run(coro: Any) -> Any:
+    """asyncio.run, on a loop psycopg's async mode supports. On Windows the default
+    is ProactorEventLoop, which psycopg rejects ("cannot use the ProactorEventLoop
+    to run in async mode"), so every run against Postgres failed there. Elsewhere
+    the selector loop is already the default, so nothing changes."""
+    if sys.platform == "win32":
+        with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
+            return runner.run(coro)
+    return asyncio.run(coro)
+
+
 def _sync(coro: Any) -> Any:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        return _run(coro)
     # Called from inside a running loop (e.g. a notebook): run on a worker thread.
     import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(1) as ex:
-        return ex.submit(asyncio.run, coro).result()
+        return ex.submit(_run, coro).result()
 
 
 def run_agent(name: str, input: Any, *, user: str | None = None, trigger: str = "http",

@@ -186,7 +186,7 @@ def main() -> int:
     print(f"Story runs: succeeded run {story[0]}, failed run {story[1]} (trace viewer and failure-triage).")
     print("Run the API against it (restart after every reset):")
     print("  set DATABASE_URL to DEMO_DATABASE_URL from .env (see below), then")
-    print("  REAGENT_LAYERS=db REAGENT_PUBLISH_STORE=db python -m uvicorn runtime.api.runs:app --port 8000")
+    print("  REAGENT_LAYERS=db REAGENT_PUBLISH_STORE=db python -m uvicorn runtime.api.runs:app --loop asyncio:SelectorEventLoop --port 8000")
     env = ROOT / ".env"
     lines = env.read_text(encoding="utf-8").splitlines() if env.exists() else []
     if not any(l.startswith("DEMO_DATABASE_URL=") for l in lines):

@@ -63,7 +63,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f contracts/db/001_init.sql
 python scripts/wrappers.py                     # 7100 memory, 7101 slack, 7102 github
 
 # 3. the runtime, from the runtime environment, in another terminal
-.venv-runtime/bin/python -m uvicorn runtime.api.runs:app --port 8000
+.venv-runtime/bin/python -m uvicorn runtime.api.runs:app --loop asyncio:SelectorEventLoop --port 8000
 
 # 4. the dashboard
 cd dashboard && npm ci && npm run dev          # 3000

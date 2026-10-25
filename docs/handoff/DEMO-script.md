@@ -13,7 +13,7 @@ on the first reset:
 ```
 DATABASE_URL=$DEMO_DATABASE_URL REAGENT_LAYERS=db REAGENT_PUBLISH_STORE=db \
   REAGENT_MODEL=live REAGENT_PIPELINE_RUNS_PER_CASE=1 \
-  python -m uvicorn runtime.api.runs:app --port 8000
+  python -m uvicorn runtime.api.runs:app --loop asyncio:SelectorEventLoop --port 8000
 # wrappers: python scripts/wrappers.py   dashboard: cd dashboard && npm run start
 ```
 

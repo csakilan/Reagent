@@ -6,7 +6,7 @@ below is what actually printed. Run from the repo root.
 ## Setup (demo machine)
 
 ```
-python -m uvicorn runtime.api.runs:app --port 8000      # WF1's app; serves WF2's routes too
+python -m uvicorn runtime.api.runs:app --loop asyncio:SelectorEventLoop --port 8000      # WF1's app; serves WF2's routes too
 export REAGENT_API=http://localhost:8000 REAGENT_USER=alice
 ```
 
