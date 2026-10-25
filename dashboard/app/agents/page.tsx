@@ -1,11 +1,5 @@
-"use client";
-
-import { useMemo, useState } from "react";
-import Link from "next/link";
-import { exampleAgents } from "../../fixtures/tab-examples";
+import CollectionView from "../collection-view";
 
 export default function AgentsPage() {
-  const [query, setQuery] = useState("");
-  const agents = useMemo(() => exampleAgents.filter(agent => `${agent.name} ${agent.team} ${agent.description} ${agent.tags?.join(" ")}`.toLowerCase().includes(query.toLowerCase())), [query]);
-  return <div className="shell"><aside className="rail"><div className="brand">ReAgent<small>POLICY CONTROL PLANE</small></div><nav className="nav"><Link href="/">Resolved view</Link><Link href="/traces">Trace viewer</Link><Link href="/publish">Publish pipeline</Link><Link className="active" href="/agents">Collection</Link><Link href="/approvals">Approvals</Link></nav></aside><main><header className="page-head"><div><div className="eyebrow">Agents / Collection</div><h1>Team collection</h1><p className="subtitle">Example enterprise agents organized across platform-eng and people-ops.</p></div><div className="toolbar"><Link className="button" href="/examples">Example setup</Link><input aria-label="Search example agents" className="select" placeholder="Filter example agents" value={query} onChange={event => setQuery(event.target.value)} /></div></header><div className="example-banner">EXAMPLE DATA · LOCAL PREVIEW ONLY · Search filters these six fixtures. Fork is disabled; nothing is saved or sent to the runtime.</div><section className="resolved"><div className="case-grid agent-grid case-header"><span>Agent · team</span><span>Desired outcome</span><span>Performance</span><span>Action</span></div>{agents.map(agent => <div className="case-grid agent-grid" key={agent.name}><div><Link href={`/agents/${encodeURIComponent(agent.name)}/edit`}><strong>{agent.name}</strong></Link><p>{agent.team} · {agent.version} · {agent.status}</p></div><div>{agent.desired_outcome ?? agent.description}<p>{agent.description}</p></div><div>{Math.round((agent.pass_rate ?? 0) * 100)}% eval pass<p>{agent.runs_30d ?? 0} runs · 30d</p><p>${agent.avg_cost_usd?.toFixed(4) ?? "—"} average run</p></div><div><button className="button link-action" disabled title="Fork is unavailable in local example mode">Fork</button></div></div>)}{agents.length === 0 && <div className="empty-state">No example agents match this filter.</div>}</section></main></div>;
+  return <CollectionView />;
 }
