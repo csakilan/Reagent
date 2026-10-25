@@ -37,7 +37,7 @@ class ExistingTables:
 def test_migration_executes_the_frozen_sql_verbatim():
     conn = ExistingTables([])
     migrate(conn)
-    assert conn.calls[-1] == ((ROOT / 'contracts' / 'db' / '001_init.sql').read_text(), {'prepare': False})
+    assert conn.calls[-1] == ((ROOT / 'contracts' / 'db' / '001_init.sql').read_text(encoding='utf-8'), {'prepare': False})
 
 
 def test_migration_refuses_a_partial_existing_schema():
