@@ -564,6 +564,9 @@ async def adecide_approval(approval_id: int, decision: str = "approved",
         recorder.finish_run(status=status, cost_usd=float(prior.get("cost_usd") or 0.0),
                             input_tokens=0, output_tokens=0, steps=int(prior.get("steps") or 0),
                             error=f"{code.value}: {msg}")
+        # A refused action is an episode worth remembering too.
+        from runtime.engine.memory_curation import schedule_curation
+        await schedule_curation(appr["run_id"], {})
         return {"run_id": appr["run_id"], "status": status, "error": f"{code.value}: {msg}",
                 "approval_id": approval_id}
     finally:

@@ -225,17 +225,17 @@ class Recorder:
             r = MEMORY[run_id]
             return {k: r.get(k) for k in ("agent", "version", "team", "user", "trigger", "status",
                                           "cost_usd", "steps", "error", "parent_run_id")} | {
-                "id": run_id, "latency_ms": None}
+                "id": run_id, "latency_ms": None, "team_id": None, "user_id": None}
         row = self.db.execute(
             "select r.id, a.name, av.version, t.name, u.name, r.trigger, r.status, r.cost_usd,"
-            " r.steps, r.error, r.parent_run_id, r.latency_ms"
+            " r.steps, r.error, r.parent_run_id, r.latency_ms, r.team_id, r.triggered_by"
             " from runs r join agent_versions av on av.id=r.agent_version_id"
             " join agents a on a.id=av.agent_id left join teams t on t.id=r.team_id"
             " left join users u on u.id=r.triggered_by where r.id=%s", (run_id,)).fetchone()
         if not row:
             raise KeyError(f"run {run_id} not found")
         keys = ["id", "agent", "version", "team", "user", "trigger", "status", "cost_usd",
-                "steps", "error", "parent_run_id", "latency_ms"]
+                "steps", "error", "parent_run_id", "latency_ms", "team_id", "user_id"]
         d = dict(zip(keys, row))
         d["cost_usd"] = float(d["cost_usd"] or 0)
         return d

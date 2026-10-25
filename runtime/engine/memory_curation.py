@@ -448,6 +448,13 @@ async def curate(run_id: int, identity: dict[str, str]) -> dict[str, Any]:
         if why:
             return {"run_id": run_id, "skipped": why}
         rec.attach(run_id)
+        # Identity comes from the run's own row, never from the caller: the
+        # resume and reject paths only know the run id, and the memory wrapper
+        # checks team membership against these numeric ids.
+        identity = {k: str(v) for k, v in {"X-Reagent-Run-ID": run_id,
+                                           "X-Reagent-Team-ID": run.get("team_id"),
+                                           "X-Reagent-User-ID": run.get("user_id")}.items()
+                    if v is not None} or dict(identity)
         store = MemoryStore(identity)
         buckets = store.buckets(run.get("team"))
         if not buckets:
