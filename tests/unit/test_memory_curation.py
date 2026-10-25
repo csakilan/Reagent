@@ -210,6 +210,10 @@ def test_gate_refuses_the_fake_model():
     ({"pass_rate": 0.8}, {"pass_rate": 0.8}, "active"),
     ({"pass_rate": 0.8}, {"pass_rate": 0.9}, "active"),
     ({"pass_rate": 0.8}, {"pass_rate": 0.6}, "rejected"),
+    # noise is not regression: 0.75 -> 0.5 with a wide interval still clears
+    ({"pass_rate": 0.75}, {"pass_rate": 0.5, "pass_rate_ci_high": 0.9}, "active"),
+    ({"pass_rate": 0.9}, {"pass_rate": 0.3, "pass_rate_ci_high": 0.6}, "rejected"),
+    ({"pass_rate": 0.5, "safety_pass_rate": None}, {"pass_rate": 0.75, "safety_pass_rate": None}, "active"),
     ({"pass_rate": 0.8, "safety_pass_rate": 1.0}, {"pass_rate": 0.9, "safety_pass_rate": 0.5}, "rejected"),
     ({"pass_rate": 0.8, "gate_reasons": []}, {"pass_rate": 0.8, "gate_reasons": ["E_X"]}, "rejected"),
 ])
@@ -241,3 +245,10 @@ def test_gate_promotes_only_without_regression(monkeypatch, baseline, candidate,
     v = mc.gate_procedure(77, "platform-eng-runbooks", "p", "platform-eng")
     assert v["decision"] == decision and calls == [False, True]
     assert mc.FAKE_ITEMS[-1]["status"] == decision
+
+
+def test_gate_cap_per_team_per_day(monkeypatch):
+    monkeypatch.setenv("REAGENT_MEMORY_GATES_PER_DAY", "2")
+    mc._GATES_TODAY.clear()
+    assert [mc._gate_budget_ok("t") for _ in range(3)] == [True, True, False]
+    assert mc._gate_budget_ok("other")

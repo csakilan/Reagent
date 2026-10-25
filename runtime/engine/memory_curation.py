@@ -528,6 +528,10 @@ async def curate(run_id: int, identity: dict[str, str]) -> dict[str, Any]:
 
     if pending and gate_mode() == "auto":
         for item_id, bucket, text in pending:
+            if not _gate_budget_ok(run["team"]):
+                summary.setdefault("gate", []).append({"item_id": item_id, "decision": "pending",
+                                                       "reason": "daily gate cap reached"})
+                continue
             summary.setdefault("gate", []).append(
                 await asyncio.to_thread(gate_procedure, item_id, bucket, text, run["team"], run_id))
     return summary
@@ -576,6 +580,18 @@ def readers_of(bucket: str, team: str) -> list[str]:
 
 
 _BASELINES: dict[tuple[str, str, str], dict[str, Any]] = {}
+_GATES_TODAY: dict[tuple[str, str], int] = {}
+
+
+def _gate_budget_ok(team: str) -> bool:
+    """Each gate is ~2 x (cases x runs_per_case) real eval runs, so cap how many
+    run automatically per team per day (REAGENT_MEMORY_GATES_PER_DAY, default 5).
+    Anything over the cap stays pending for the manual CLI."""
+    key = (team, time.strftime("%Y-%m-%d"))
+    if _GATES_TODAY.get(key, 0) >= int(os.environ.get("REAGENT_MEMORY_GATES_PER_DAY", "5")):
+        return False
+    _GATES_TODAY[key] = _GATES_TODAY.get(key, 0) + 1
+    return True
 
 
 def gate_procedure(item_id: int, bucket: str, text: str, team: str,
@@ -609,14 +625,8 @@ def gate_procedure(item_id: int, bucket: str, text: str, team: str,
             base = _BASELINES[key]
             cand = run_evals(agent, runs_per_case=runs_per_case, fake_model=False,
                              include_inherited=False, draft=_with_candidate(doc, text))
-            new_reasons = sorted(set(cand.get("gate_reasons") or []) - set(base.get("gate_reasons") or []))
-            safety_drop = (base.get("safety_pass_rate") is not None
-                           and (cand.get("safety_pass_rate") or 0) < base["safety_pass_rate"])
-            passed = (cand.get("pass_rate", 0) >= base.get("pass_rate", 0)
-                      and not safety_drop and not new_reasons)
-            verdict["agents"][agent] = {"baseline": base.get("pass_rate"),
-                                        "candidate": cand.get("pass_rate"),
-                                        "new_gate_reasons": new_reasons, "passed": passed}
+            verdict["agents"][agent] = judge(base, cand)
+            passed = verdict["agents"][agent]["passed"]
             ok = ok and passed
         verdict["decision"] = "active" if ok else "rejected"
         verdict["reason"] = "no regression" if ok else "regressed an agent's evals"
@@ -625,6 +635,26 @@ def gate_procedure(item_id: int, bucket: str, text: str, team: str,
         _advisory_unlock(lock)
     _record_gate(verdict, source_run_id)
     return verdict
+
+
+def judge(base: dict[str, Any], cand: dict[str, Any]) -> dict[str, Any]:
+    """Non-inferiority, not "candidate >= baseline": with a few runs per case,
+    2/4 vs 3/4 is noise, and a point comparison is a coin flip (found live).
+      - pass rate: reject only if the candidate is significantly WORSE, i.e. the
+        top of its Wilson interval is below the baseline's point estimate;
+      - safety: must not drop at all (None vs None is no drop);
+      - no gate reason the baseline did not already have."""
+    b, c = float(base.get("pass_rate") or 0.0), float(cand.get("pass_rate") or 0.0)
+    c_high = cand.get("pass_rate_ci_high")
+    c_high = float(c_high) if c_high is not None else c
+    bs, cs = base.get("safety_pass_rate"), cand.get("safety_pass_rate")
+    safety_drop = bs is not None and (cs is None or float(cs) < float(bs))
+    new_reasons = sorted(set(cand.get("gate_reasons") or []) - set(base.get("gate_reasons") or []))
+    worse = c_high < b
+    return {"baseline": b, "candidate": c, "candidate_ci_high": c_high,
+            "baseline_safety": bs, "candidate_safety": cs, "new_gate_reasons": new_reasons,
+            "significantly_worse": worse, "safety_drop": safety_drop,
+            "passed": not worse and not safety_drop and not new_reasons}
 
 
 def _advisory_lock(team: str) -> Any:

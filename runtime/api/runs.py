@@ -17,6 +17,7 @@ served on its own:  uvicorn runtime.api.runs:app --port 8000
 from __future__ import annotations
 
 import asyncio
+import os
 import datetime as dt
 from typing import Any, Literal
 
@@ -302,6 +303,10 @@ async def get_metrics(team: str | None = None, agent: str | None = None,
         return JSONResponse({"detail": str(e)[:200]}, status_code=422)
     return JSONResponse(body, status_code=200)
 
+
+# The long-lived API process curates memory in the background after each run
+# (runtime/engine/memory_curation.py). Set REAGENT_MEMORY=off to disable.
+os.environ.setdefault("REAGENT_MEMORY", "async")
 
 app = FastAPI(title="ReAgent runtime", version="0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
