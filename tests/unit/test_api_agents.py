@@ -52,3 +52,26 @@ def test_validate_returns_rejections_naming_the_field():
     assert body["valid"] is False
     assert body["rejections"][0]["field"] == "spec.budget.timeout_seconds"
     assert body["rejections"][0]["blocked_by"] == "enterprise"
+
+
+def test_publish_pipeline_over_http():
+    pytest.importorskip("langchain")
+    from runtime.publish import STORE
+    STORE.runs.clear()
+    H = {"X-ReAgent-User": "alice"}
+    r = client.post("/v0/agents/pr-reviewer/publish", headers=H)
+    assert r.status_code == 202 and r.json()["review_url"].endswith(f"run={r.json()['publish_run_id']}")
+    rid = r.json()["publish_run_id"]
+    assert client.post("/v0/agents/pr-reviewer/publish", headers=H).status_code == 409
+    assert client.post(f"/v0/publish-runs/{rid}/continue", headers=H).status_code == 409
+    dry = client.post(f"/v0/publish-runs/{rid}/cases/agent/never-merges/dry-run", headers=H).json()
+    assert dry["passed"] and dry["output"]["blocked_calls"] == ["github:pulls.merge"]
+    assert client.get(f"/v0/publish-runs/{rid}", headers={"X-ReAgent-User": "dana"}).status_code == 404
+    for c in client.get(f"/v0/publish-runs/{rid}", headers=H).json()["cases"]:
+        if c["decision"] is None:
+            ok = client.post(f"/v0/publish-runs/{rid}/cases/{c['case_id']}/review",
+                             json={"decision": "approve"}, headers=H)
+            assert ok.status_code == 200
+    done = client.post(f"/v0/publish-runs/{rid}/continue", headers=H).json()
+    assert done["status"] in ("failed", "succeeded") and done["stage"] in ("gate", "publish")
+    STORE.runs.clear()

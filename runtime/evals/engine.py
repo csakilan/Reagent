@@ -165,13 +165,16 @@ def run_evals(agent: str, runs_per_case: int | None = None, *, fake_model: bool 
                 g = grade(item["case"], tr, output_schema, calib["calibrated"])
                 graded.append(g)
                 runs.append((item, g, tr))
-            errors = [t.error for i, _, t in runs if i is item and t.error]
+            mine = [t for i, _, t in runs if i is item]
+            errors = [t.error for t in mine if t.error]
             passes = sum(1 for g in graded if g["passed"])
             report["cases"].append({
                 "case_id": item["case_id"], "origin": item["origin"], "kind": item["kind"],
                 "case_hash": item["case_hash"], "gating": gating, "runs": k, "passes": passes,
                 "passed": gating and passes == k, "error": errors[0] if errors else None,
                 "checks": graded[-1]["checks"] if graded else {},
+                "tool_calls": [p for p, _ in mine[-1].calls] if mine else [],
+                "blocked_calls": list(mine[-1].denied) if mine else [],
             })
 
     gate_runs = [(i, g, t) for i, g, t in runs if has_code_check(i["case"])]
