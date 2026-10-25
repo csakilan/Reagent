@@ -2,6 +2,14 @@
 
 Setup first (`SETUP.md`), then paste the matching block into the agent.
 
+**These work on either tool.** Claude Code loads `CLAUDE.md` automatically;
+Codex loads `AGENTS.md`, which is generated from it and CI-checked. Every prompt
+below also tells the agent to open the `AGENTS.md` in the directory it owns,
+because Codex only walks from the repo root down to the *working directory*, so
+a session started at the root does not pick those up on its own.
+
+Any of the four can switch tools: `claude` or `codex`, same prompt.
+
 ## Dependency chain
 
 ```
@@ -17,10 +25,10 @@ me: contracts (H0, done)
 
 ---
 
-## 1. YOU — data · `claude` on wf/data
+## 1. YOU — data · `claude` or `codex` on wf/data
 
-> You are the WF4 data agent on branch `wf/data`. Read `docs/agents/WF4-data.md`
-> and follow it exactly. Read `docs/research/tigerdata.md` before touching the
+> You are the WF4 data agent on branch `wf/data`. Read `docs/agents/WF4-data.md`,
+> `connectors/AGENTS.md` and `runtime/AGENTS.md` first, and follow them exactly. Read `docs/research/tigerdata.md` before touching the
 > database and `docs/research/mcp.md` before any MCP wrapper, because the MCP SDK
 > renamed its main class and your training data is wrong about it.
 >
@@ -37,11 +45,11 @@ me: contracts (H0, done)
 
 ---
 
-## 2. RESOLVER — Claude Code · `claude` on wf/resolver
+## 2. RESOLVER — `claude` or `codex` on wf/resolver
 
 > You are the WF2 resolver agent on branch `wf/resolver`. Read
-> `docs/agents/WF2-resolver.md` and follow it exactly, then read all 25 entries
-> in `docs/decisions/FROZEN.md`: most govern your code and they override SPEC.md
+> `docs/agents/WF2-resolver.md`, `runtime/AGENTS.md` and `cli/AGENTS.md` first and
+> follow them exactly, then read all 25 entries in `docs/decisions/FROZEN.md`: most govern your code and they override SPEC.md
 > where they conflict.
 >
 > ORDER. You are the critical path. Two agents cannot start their real work until
@@ -58,10 +66,11 @@ me: contracts (H0, done)
 
 ---
 
-## 3. RUNTIME — Claude Code · `claude` on wf/runtime
+## 3. RUNTIME — `claude` or `codex` on wf/runtime
 
 > You are the WF1 runtime agent on branch `wf/runtime`. Read
-> `docs/agents/WF1-runtime.md` and follow it exactly. Before writing ANY
+> `docs/agents/WF1-runtime.md` and `runtime/AGENTS.md` first and follow them
+> exactly. Before writing ANY
 > middleware read `docs/research/langchain.md`: two assumptions were refuted
 > against the real LangChain source. There is no `before_tool` hook, and
 > `langchain-mcp-adapters` cannot filter a server to a subset of its tools, so
@@ -82,11 +91,11 @@ me: contracts (H0, done)
 
 ---
 
-## 4. DASHBOARD — Codex · `codex` on wf/dashboard
+## 4. DASHBOARD — `codex` (or `claude`) on wf/dashboard
 
 > You are the WF3 dashboard agent on branch `wf/dashboard`. Read
-> `docs/agents/WF3-dashboard.md` and follow it exactly. Treat
-> `dashboard/AGENTS.md` as binding rather than advisory: colour encodes
+> `docs/agents/WF3-dashboard.md` and `dashboard/AGENTS.md` first and follow them
+> exactly. Treat `dashboard/AGENTS.md` as binding rather than advisory: colour encodes
 > provenance and verdict and nothing else, and the banned list is absolute.
 > Generate your typed API client from `contracts/openapi.yaml` rather than
 > hand-writing fetch calls.

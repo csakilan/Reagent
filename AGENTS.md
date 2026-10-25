@@ -77,6 +77,8 @@ connectors/                WF4. MCP wrapper servers
 cli/                       WF2. Typer CLI
 docs/agents/               your brief. Read yours.
 docs/handoff/              the per-laptop files the humans were sent. Context, not instructions for you.
+AGENTS.md                  generated twin of this file, for the Codex laptop
+<dir>/AGENTS.md            per-directory rules: runtime/, connectors/, cli/, dashboard/
 docs/research/             VERIFIED external facts. Section 9. Trust these over your training data.
 ```
 
@@ -352,6 +354,23 @@ only where state genuinely changes, 120ms.
 Tables over cards. The data here is tabular and dense: respect it.
 
 ---
+
+## 10b. If you are running on Codex rather than Claude Code
+
+Codex reads `AGENTS.md`, not `CLAUDE.md`. The two are generated from one source
+and CI fails if they drift, so you are reading the same content either way.
+
+**One thing to know about how your context was assembled.** Codex walks from the
+repository root down to your *working directory* and concatenates the
+`AGENTS.md` files it finds, closest last. So if you started in the repo root you
+have only this file. The per-directory rules in `runtime/AGENTS.md`,
+`connectors/AGENTS.md`, `cli/AGENTS.md` and `dashboard/AGENTS.md` are **not**
+loaded automatically from the root.
+
+**So read them yourself.** Open the `AGENTS.md` in whichever directory you own,
+and open your brief in `docs/agents/`. Both are small and both contain rules you
+will otherwise break. Your prompt should have told you which brief is yours; if
+it did not, `.handoffs.yaml` lists which workflow owns what.
 
 ## 11. Rules that apply to every agent
 
