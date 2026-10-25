@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { DEMO_USERS, listAgents, type AgentSummary } from "../lib/api";
 import { recordedAgents } from "../lib/fixtures";
 import { useDemoUser, useLive } from "../lib/live";
@@ -14,7 +15,9 @@ export default function Collection() {
   const team = DEMO_USERS.find(item => item.id === user)?.team ?? null;
   const [query, setQuery] = useState("");
   const [term, setTerm] = useState("");
-  const [drawer, setDrawer] = useState<{ fork?: string } | null>(null);
+  // /agents?new=1 (from Getting started) opens the New agent drawer straight away.
+  const params = useSearchParams();
+  const [drawer, setDrawer] = useState<{ fork?: string } | null>(() => params.get("new") ? {} : null);
   useEffect(() => { const timer = setTimeout(() => setTerm(query.trim()), 250); return () => clearTimeout(timer); }, [query]);
 
   const [state, reload] = useLive<{ agents: AgentSummary[] }>(user && `agents:${user}:${term}`, () => listAgents(term || undefined), { fallback: recordedAgents });
@@ -51,7 +54,7 @@ export default function Collection() {
         <span className="num">{usd(agent.avg_cost_usd)}</span>
         <span className="num">{agent.runs_30d ?? "—"}</span>
         <span className="row-actions">
-          <Link className="button" href={`/resolved?agent=${agent.name}`}>Resolved</Link>
+          <Link className="button" href={`/hierarchy?agent=${agent.name}`}>Policy</Link>
           <button className="button" type="button" onClick={() => setDrawer({ fork: agent.name })}>Fork</button>
         </span>
       </div>)}

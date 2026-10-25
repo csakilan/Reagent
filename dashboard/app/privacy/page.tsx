@@ -32,7 +32,7 @@ export default function PrivacyPage() {
     </section>
     <section>
       <h2>Who can see what</h2>
-      <p>Members see only their own team&apos;s agents, runs and approvals. Enterprise-layer values are returned as locked rows with their source tag and no value. The server applies every filter; the dashboard never hides data on its own. See <Link href="/resolved">the resolved view</Link>.</p>
+      <p>Members see only their own team&apos;s agents, runs and approvals. Enterprise-layer values are returned as locked rows with their source tag and no value. The server applies every filter; the dashboard never hides data on its own. See <Link href="/hierarchy">the policy hierarchy</Link>.</p>
     </section>
   </div>;
 }

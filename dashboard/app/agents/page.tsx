@@ -1,6 +1,7 @@
+import { Suspense } from "react";
 import Collection from "../collection";
+import { Skeleton } from "../ui";
 
-/** Kept so existing /agents links still work; the collection now lives at /. */
 export default function CollectionPage() {
-  return <Collection />;
+  return <Suspense fallback={<Skeleton rows={6} columns={6} label="Loading agents" />}><Collection /></Suspense>;
 }

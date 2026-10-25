@@ -1,20 +1,19 @@
 "use client";
 
-import Link from "next/link";
-import { Fragment, useMemo, useState, type ReactNode } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { listAgents, resolvedAgent, type AgentSummary } from "../lib/api";
-import { recordedAgents, recordedResolved } from "../lib/fixtures";
+import { Fragment, useMemo, useState } from "react";
+import { resolvedAgent } from "../lib/api";
 import { brief, groupByLayer, sectionTitle, type LayerGroup, type Setting } from "../lib/layers";
 import { useDemoUser, useLive } from "../lib/live";
 import { flatten, layerName, layerOf, show, type Layer, type Leaf, type Resolved } from "../lib/resolved";
-import { Failure, Icon, PageHead, Rejections, Skeleton, SourceTag, when } from "./ui";
+import { Failure, Icon, Rejections, Skeleton } from "./ui";
 
+/** Read top to bottom: the agent's own spec, then the layers it must fit inside. */
 const ROLE: Record<Layer, { title: (source: string, spec: Resolved) => string; rule: string; next?: string }> = {
-  enterprise: { title: () => "Enterprise", rule: "Outer limits and safety rules for every team and agent. Set by enterprise admins.", next: "Team can only tighten these" },
-  team: { title: source => `Team · ${source.replace(/^team:/, "")}`, rule: "Narrows the enterprise limits for this team's agents. Set by enterprise admins.", next: "The agent can only tighten these" },
-  agent: { title: (_, spec) => `Agent · ${spec.agent}.agent`, rule: "What this agent asks for, inside the team's limits. Written by the team." },
+  agent: { title: (_, spec) => `Agent · ${spec.agent}`, rule: "What this agent asks for. Written by the team.", next: "can only ask for what its team allows" },
+  team: { title: source => `Team · ${source.replace(/^team:/, "")}`, rule: "Narrows the enterprise limits for this team's agents. Set by enterprise admins.", next: "can only tighten what the enterprise allows" },
+  enterprise: { title: () => "Enterprise", rule: "Outer limits and safety rules for every team and agent. Set by enterprise admins." },
 };
+const ORDER: Layer[] = ["agent", "team", "enterprise"];
 
 type Obj = Record<string, unknown>;
 const isObj = (value: unknown): value is Obj => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -71,7 +70,7 @@ function LayerPanel({ group, spec }: { group: LayerGroup; spec: Resolved }) {
           <h2 className={`layer-tag layer-${group.layer}`}><i />{role.title(group.source, spec)}</h2>
           <p>{role.rule}</p>
         </div>
-        <span className="layer-count">{group.settings.length} settings{limits ? ` · ${limits} tightened below` : ""}{group.hidden ? ` · ${group.hidden} hidden` : ""}</span>
+        <span className="layer-count">{group.settings.length} settings{limits ? ` · ${limits} tightened` : ""}{group.hidden ? ` · ${group.hidden} hidden` : ""}</span>
       </header>
       {!group.settings.length && <p className="layer-empty">This layer adds nothing to {spec.agent}; it inherits everything above.</p>}
       {allHidden ? <div className="layer-hidden">
@@ -119,57 +118,30 @@ function AllValues({ spec }: { spec: Resolved }) {
   </section>;
 }
 
-export default function ResolvedView() {
-  const params = useSearchParams();
-  const router = useRouter();
-  const user = useDemoUser();
-  const agent = params.get("agent") ?? "pr-reviewer";
-  const view = params.get("view") === "values" ? "values" : "layers";
-  const [agents] = useLive<{ agents: AgentSummary[] }>(user && `agents:${user}`, () => listAgents(), { fallback: recordedAgents });
-  const [state] = useLive<Resolved>(user && `resolved:${user}:${agent}`, () => resolvedAgent(agent), { fallback: () => user ? recordedResolved(user, agent) : undefined });
-
+/** An agent's resolved policy, grouped by the layer each value came from:
+ *  the agent's own spec first, then its team, then the enterprise. Enterprise
+ *  values arrive from the server already redacted for members (FROZEN D3). */
+export default function ResolvedLayers({ agent, user }: { agent: string; user: string | null }) {
+  const [view, setView] = useState<"layers" | "values">("layers");
+  const [state] = useLive<Resolved>(user && `resolved:${user}:${agent}`, () => resolvedAgent(agent));
   const spec = state.phase === "ready" ? state.data : null;
-  const groups = useMemo(() => spec ? groupByLayer(spec.provenance) : [], [spec]);
-  const names = agents.phase === "ready" ? agents.data.agents.map(item => item.name) : [agent];
-  const go = (next: { agent?: string; view?: string }) => {
-    const query = new URLSearchParams({ agent: next.agent ?? agent });
-    if ((next.view ?? view) === "values") query.set("view", "values");
-    router.replace(`/resolved?${query}`);
-  };
+  const groups = useMemo(() => spec ? groupByLayer(spec.provenance).sort((a, b) => ORDER.indexOf(a.layer) - ORDER.indexOf(b.layer)) : [], [spec]);
   const narrowed = groups.reduce((sum, g) => sum + g.settings.filter(s => s.kind === "limit").length, 0);
   const hidden = groups.reduce((sum, g) => sum + g.hidden, 0);
-  const summary: ReactNode = spec && <>
-    What <b>{spec.agent}</b> is allowed to do is built from {groups.filter(g => g.settings.length).length} layers, read top to bottom and merged again on every run.
-    Each layer can only tighten the one above it{narrowed ? <>; here, <b>{narrowed}</b> limits were tightened by a lower layer</> : null}.
-    {hidden ? <> {hidden} enterprise settings are hidden because you are logged in as a member.</> : null}
-  </>;
-
-  return <>
-    <PageHead crumb="Policy / Resolved view" title={<span className="mono-title">{agent}</span>}
-      subtitle={spec ? <>Version {spec.version} · {spec.team ?? "enterprise"} · resolved {when(spec.resolved_at)} for <b>{spec.caller.user}</b>{spec.caller.is_enterprise_admin ? " (enterprise admin)" : " (member)"}</> : "How this agent's policy is built, layer by layer"}>
-      <SourceTag state={state} />
-      <label className="field-inline"><span>Agent</span>
-        <select className="select" value={agent} onChange={event => go({ agent: event.target.value })}>
-          {[...new Set([agent, ...names])].map(name => <option key={name} value={name}>{name}</option>)}
-        </select>
-      </label>
-      <Link className="button" href={`/agents/${agent}/edit`}>Edit</Link>
-      <Link className="button" href={`/traces?agent=${agent}`}>Run</Link>
-    </PageHead>
-
-    {state.phase === "loading" && <Skeleton rows={12} columns={3} label="Resolving policy" />}
-    <Failure state={state} notFound={<><b>{agent}</b> is not visible to <b>{user}</b>. Members see only their own team&apos;s agents; the API returns the same 404 whether an agent is hidden or missing.</>} />
-
+  return <section className="resolved-in-graph" aria-label={`Resolved policy for ${agent}`}>
+    {state.phase === "loading" && <Skeleton rows={8} columns={3} label="Resolving policy" />}
+    <Failure state={state} notFound={<><b>{agent}</b> is not visible to <b>{user}</b>.</>} />
     {spec && <>
       <Rejections items={spec.rejections} title="This agent does not resolve" />
       <div className="resolved-intro">
-        <p>{summary}</p>
+        <p>What <b>{spec.agent}</b> can do, merged from {groups.filter(g => g.settings.length).length} layers on every run: its own spec, then the layers above it, each of which can only tighten what it inherits{narrowed ? <>. Here <b>{narrowed}</b> limits were tightened</> : null}.
+          {hidden ? <> {hidden} enterprise settings are hidden because you are a member.</> : null}</p>
         <div className="segmented" role="tablist" aria-label="View">
-          <button type="button" role="tab" aria-selected={view === "layers"} className={view === "layers" ? "is-on" : undefined} onClick={() => go({ view: "layers" })}>By layer</button>
-          <button type="button" role="tab" aria-selected={view === "values"} className={view === "values" ? "is-on" : undefined} onClick={() => go({ view: "values" })}>All values</button>
+          <button type="button" role="tab" aria-selected={view === "layers"} className={view === "layers" ? "is-on" : undefined} onClick={() => setView("layers")}>By layer</button>
+          <button type="button" role="tab" aria-selected={view === "values"} className={view === "values" ? "is-on" : undefined} onClick={() => setView("values")}>All values</button>
         </div>
       </div>
       {view === "layers" ? <div className="layer-stack">{groups.map(group => <LayerPanel key={group.layer} group={group} spec={spec} />)}</div> : <AllValues spec={spec} />}
     </>}
-  </>;
+  </section>;
 }

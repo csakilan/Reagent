@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
+import ResolvedLayers from "../resolved-layers";
 import type { PointerEvent, WheelEvent, KeyboardEvent, ReactNode } from "react";
 
 /** GET /v0/hierarchy: built per caller on the server. A member receives only their
@@ -45,10 +47,16 @@ function DetailRows({ rows }: { rows: [string, ReactNode][] }) {
   return <dl className="graph-detail-rows">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? "Not set"}</dd></div>)}</dl>;
 }
 
-export default function ConfigGraph({ setup }: { setup: Setup }) {
+export default function ConfigGraph({ setup, initialAgent }: { setup: Setup; initialAgent?: string | null }) {
   const { GRAPH_WIDTH, enterprisePoint, teamPoint, agentPoint } = useMemo(() => makeLayout(setup), [setup]);
   const E = setup.enterprise;
-  const [selected, setSelected] = useState<Selection>({ kind: "enterprise" });
+  const [selected, setSelected] = useState<Selection>(() => {
+    for (const team of setup.teams) {
+      const agent = team.agents.find(a => a.name === initialAgent);
+      if (agent) return { kind: "agent", team, agent };
+    }
+    return { kind: "enterprise" };
+  });
   const [camera, setCamera] = useState({ x: GRAPH_WIDTH / 2 - enterprisePoint.x * 0.78, y: HEIGHT / 2 - enterprisePoint.y * 0.78, zoom: 0.78 });
   const [dragging, setDragging] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -108,7 +116,7 @@ export default function ConfigGraph({ setup }: { setup: Setup }) {
 
   const selectedTitle = selected.kind === "enterprise" ? E.name : selected.kind === "team" ? selected.team.name : selected.agent.name;
   const selectedLayer = selected.kind === "enterprise" ? "Enterprise layer" : selected.kind === "team" ? "Team layer" : "Agent layer";
-  return <div className="hierarchy-workspace">
+  return <><div className="hierarchy-workspace">
     <section className="graph-panel" aria-label="Configuration hierarchy graph">
       <div className="graph-toolbar"><div><span className="crumb">Configuration hierarchy</span><div className="graph-count">1 enterprise <b>·</b> {setup.teams.length} teams <b>·</b> {setup.teams.reduce((n, team) => n + team.agents.length, 0)} agents</div></div><div className="camera-controls"><button type="button" aria-label="Zoom out" onClick={() => zoomAt(camera.zoom / 1.2)}>−</button><span>{Math.round(camera.zoom * 100)}%</span><button type="button" aria-label="Zoom in" onClick={() => zoomAt(camera.zoom * 1.2)}>+</button><button type="button" aria-label="Fit graph to view" onClick={fit}>Fit</button></div></div>
       <div className="graph-viewport"><svg ref={svgRef} viewBox={`0 0 ${GRAPH_WIDTH} ${HEIGHT}`} className={`hierarchy-svg ${dragging ? "is-dragging" : ""}`} role="group" aria-label="Interactive enterprise, team, and agent hierarchy" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel}>
@@ -146,7 +154,7 @@ export default function ConfigGraph({ setup }: { setup: Setup }) {
       </svg><div className="graph-hint">Drag canvas to pan <span>·</span> Scroll to zoom <span>·</span> Select a node to inspect</div></div>
       <div className="graph-legend"><span><i className="legend-mark legend-enterprise" />Enterprise provenance</span><span><i className="legend-mark legend-team" />Team provenance</span><span><i className="legend-mark legend-agent" />Agent configuration</span></div>
     </section>
-    <aside className="graph-details" aria-live="polite"><header><div className="crumb">{selectedLayer}</div><h2>{selectedTitle}</h2><p>From spec/examples · the files this deployment was seeded with</p></header>
+    <aside className="graph-details" aria-live="polite"><header><div className="crumb">{selectedLayer}</div><h2>{selectedTitle}</h2><p>Live from the API, filtered for {setup.viewer.user}{setup.viewer.is_enterprise_admin ? " (enterprise admin)" : ` (${setup.viewer.team})`}</p></header>
       {selected.kind === "enterprise" && E.locked && <>
         <DetailSection title="Enterprise policy" inherited><p className="graph-locked">{E.description}</p>
           <DetailRows rows={[["Why it is hidden", "Members never see the enterprise layer (SPEC.md §2). The server does not send it."],
@@ -166,13 +174,14 @@ export default function ConfigGraph({ setup }: { setup: Setup }) {
         <DetailSection title="Available agents"><div className="graph-agent-list">{selected.team.agents.map(agent => <button key={agent.name} onClick={() => choose({ kind: "agent", team: selected.team, agent }, agentPoint(selected.team, setup.teams.indexOf(selected.team), selected.team.agents.indexOf(agent), setup.teams.length))}>{agent.name}<span>{agent.model}</span></button>)}</div></DetailSection>
       </>}
       {selected.kind === "agent" && <>
-        <DetailSection title="Agent configuration"><DetailRows rows={[["File", `${selected.agent.name}.agent · ${selected.agent.version}`], ["Example origin", selected.agent.source], ["Purpose", selected.agent.purpose], ["Task prompt", selected.agent.prompt]]} /></DetailSection>
-        <DetailSection title="Inherited policies" inherited><DetailRows rows={[["Enterprise", "Secret/PII redaction · audit logging · redacted traces"], ["Team", `${selected.team.name} connector grants, channel/repository scopes, model allowlist and approval rules`], ["Effective model constraint", text(selected.team.models.allow)], ["Budgets", `${selected.team.limits.usd_per_month} monthly team budget ${E.limits ? ` · $${E.limits.usd_per_run.toFixed(2)} enterprise per-run ceiling` : ""}`]]} /></DetailSection>
-        <DetailSection title="Model, tools and scopes"><DetailRows rows={[["Model", selected.agent.model], ["Fallback", selected.agent.fallback], ["Tool allowlist", text(selected.agent.tools)], ["Resource scopes", text(selected.agent.resources)]]} /></DetailSection>
-        <DetailSection title="Execution and memory"><DetailRows rows={[["Budget", selected.agent.budget], ["Triggers", text(selected.agent.triggers)], ["Memory", text(selected.agent.memory)]]} /></DetailSection>
-        <DetailSection title="Evaluation, guardrails and observability"><DetailRows rows={[["Evaluation", text(selected.agent.evaluation)], ["Guardrails", text(selected.agent.guardrails)], ["Observability", text(selected.agent.observability)]]} /></DetailSection>
+        <DetailSection title="Agent"><DetailRows rows={[["File", `${selected.agent.name}.agent · ${selected.agent.version}`], ["Purpose", selected.agent.purpose],
+          ["Model", selected.agent.model], ["Tools", text(selected.agent.tools)], ["Budget", selected.agent.budget]]} /></DetailSection>
+        <p className="graph-locked">Its full policy, agent first, then {selected.team.name}, then the enterprise, is below the graph.</p>
+        <div className="toolbar"><Link className="button" href={`/agents/${selected.agent.name}/edit`}>Edit</Link><Link className="button" href={`/traces?agent=${selected.agent.name}`}>Run</Link></div>
       </>}
       <div className="graph-detail-foot">Read-only. Team and enterprise layers are edited by enterprise admins, and every change applies on each agent’s next run.</div>
     </aside>
-  </div>;
+  </div>
+  {selected.kind === "agent" && <ResolvedLayers key={selected.agent.name} agent={selected.agent.name} user={setup.viewer.user} />}
+  </>;
 }

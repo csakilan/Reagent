@@ -91,7 +91,7 @@ export default function EditorPage() {
   return <>
     <PageHead crumb="Agents / Editor" title={<span className="mono-title">{name}.agent</span>} subtitle="Validated against the live enterprise and team layers as you type. Nothing is saved from here.">
       <SourceTag state={state} />
-      <Link className="button" href={`/resolved?agent=${name}`}>Resolved view</Link>
+      <Link className="button" href={`/hierarchy?agent=${name}`}>Policy</Link>
       <button className="button primary" type="button" disabled={publishing} onClick={publish}>{publishing ? "Starting…" : "Start publish pipeline"}</button>
     </PageHead>
     {publishProblem && (publishProblem.rejections.length ? <Rejections items={publishProblem.rejections} title="Pipeline refused" /> : <div className="notice notice-denied">{publishProblem.detail}</div>)}
