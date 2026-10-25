@@ -20,17 +20,9 @@ pytest.importorskip("langgraph")
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
-#: Known gap, not a scenario bug: runner.adecide_approval finishes a REJECTED or
-#: EXPIRED run itself, without _finalise, so schedule_curation never fires and a
-#: run denied by its reviewer leaves no episode. These are run B's checks. Empty
-#: this set once the runner calls schedule_curation on that path.
-KNOWN_GAP = {
-    "run B: exactly one episode",
-    "episode B records the refused merge and the rejection",
-    "episode B drops the injected summary but is still written",
-    "the curator was called once per finished root run",
-    "run B: every bad proposal dropped for the right reason",
-}
+#: Checks allowed to FAIL without failing this test. Was run B's five checks
+#: until runner.adecide_approval curated rejected/expired runs; keep it empty.
+KNOWN_GAP: set[str] = set()
 
 
 def test_memory_demo_scenario():
