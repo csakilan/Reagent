@@ -1,0 +1,349 @@
+{
+ "runs": {
+  "1": {
+   "run_id": 1,
+   "parent_run_id": null,
+   "status": "succeeded",
+   "output": {
+    "text": "Review of nmc2/infra#42: Add S3 bucket for build artifacts.\n- infra/main.tf: aws_s3_bucket.artifacts uses acl public-read. Make the bucket private.\n- secret-scanner: {\"findings\": [{\"file\": \"infra/main.tf\", \"line\": 5, \"kind\": \"known_secret\", \"confidence\": 0.97}, {\"file\": \"infra/main.tf\", \"line\": 6, \"kind\": \"known_secret\", \"confidence\": 0.97}]}\nDiff reviewed:\ndiff --git a/infra/main.tf b/infra/main.tf\n@@ -1,3 +1,12 @@\n+provider \"aws\" {\n+  region     = \"us-east-1\"\n+  access_key = \"[REDACTED:known_secret]\"\n+  secret_key = \"[REDACTED:known_secret]\"\n+}\n+resource \"aws_s3_bucket\" \"artifacts\" {\n+  bucket = \"nmc2-build-artifacts\"\n+  acl    = \"public-read\"\n+}\n\n\nPosted the review to the pull request."
+   },
+   "cost_usd": 0.002,
+   "input_tokens": 1504,
+   "output_tokens": 254,
+   "steps": 4,
+   "latency_ms": null,
+   "model": null,
+   "error": null,
+   "rejections": [],
+   "pending_approval_id": null
+  },
+  "2": {
+   "run_id": 2,
+   "parent_run_id": 1,
+   "status": "succeeded",
+   "output": {
+    "text": "{\"findings\": [{\"file\": \"infra/main.tf\", \"line\": 5, \"kind\": \"known_secret\", \"confidence\": 0.97}, {\"file\": \"infra/main.tf\", \"line\": 6, \"kind\": \"known_secret\", \"confidence\": 0.97}]}"
+   },
+   "cost_usd": 0.0004,
+   "input_tokens": 233,
+   "output_tokens": 64,
+   "steps": 1,
+   "latency_ms": null,
+   "model": null,
+   "error": null,
+   "rejections": [],
+   "pending_approval_id": null
+  }
+ },
+ "traces": {
+  "1": {
+   "run_id": 1,
+   "children": [
+    2
+   ],
+   "events": [
+    {
+     "run_id": 1,
+     "seq": 0,
+     "type": "span_open",
+     "action": null,
+     "allowed": null,
+     "payload_redacted": {
+      "span_id": "ecea4f974d2547cd",
+      "parent_span_id": null,
+      "name": "pr-reviewer",
+      "agent": "pr-reviewer",
+      "version": "1.0.0",
+      "trigger": "http"
+     },
+     "span_id": "ecea4f974d2547cd",
+     "parent_span_id": null
+    },
+    {
+     "run_id": 1,
+     "seq": 1,
+     "type": "model_call",
+     "action": null,
+     "allowed": null,
+     "payload_redacted": {
+      "model": "qwen-coder",
+      "openrouter_model": "fake/qwen/qwen3-coder-30b-a3b-instruct",
+      "input_tokens": 267,
+      "output_tokens": 20,
+      "cost_usd": 0.0004,
+      "cumulative_cost_usd": 0.0004,
+      "latency_ms": 6,
+      "fallback_used": false,
+      "finish_reason": "tool_calls"
+     }
+    },
+    {
+     "run_id": 1,
+     "seq": 2,
+     "type": "redaction_hit",
+     "action": null,
+     "allowed": null,
+     "payload_redacted": {
+      "pattern": "known_secret",
+      "location": "tool_result",
+      "count": 2
+     }
+    },
+    {
+     "run_id": 1,
+     "seq": 3,
+     "type": "tool_call",
+     "action": "github:pulls.read",
+     "allowed": true,
+     "payload_redacted": {
+      "mcp_tool": "github__pulls_read",
+      "args": {
+       "repo": "nmc2/infra",
+       "pr_number": 42
+      },
+      "resource": "nmc2/infra",
+      "result_summary": "{\"repo\": \"nmc2/infra\", \"number\": 42, \"title\": \"Add S3 bucket for build artifacts\", \"author\": \"bob\", \"diff\": \"diff --git a/infra/main.tf b/infra/main.tf\\n@@ -1,3 +1,12 @@\\n+provider \\\"aws\\\" {\\n+  region     = \\\"us-east-1\\\"\\n+  access_key = \\\"[REDACTED:known_secret]\\\"\\n+  secret_key = \\\"[REDACTED:know... (435 chars)",
+      "duration_ms": 1,
+      "error": null
+     }
+    },
+    {
+     "run_id": 1,
+     "seq": 4,
+     "type": "model_call",
+     "action": null,
+     "allowed": null,
+     "payload_redacted": {
+      "model": "qwen-coder",
+      "openrouter_model": "fake/qwen/qwen3-coder-30b-a3b-instruct",
+      "input_tokens": 376,
+      "output_tokens": 20,
+      "cost_usd": 0.0004,
+      "cumulative_cost_usd": 0.0008,
+      "latency_ms": 4,
+      "fallback_used": false,
+      "finish_reason": "tool_calls"
+     }
+    },
+    {
+     "run_id": 1,
+     "seq": 5,
+     "type": "span_open",
+     "action": "agent:secret-scanner",
+     "allowed": null,
+     "payload_redacted": {
+      "span_id": "3da02c9a4b1742cb",
+      "parent_span_id": "ecea4f974d2547cd",
+      "name": "agent:secret-scanner"
+     },
+     "span_id": "3da02c9a4b1742cb",
+     "parent_span_id": "ecea4f974d2547cd"
+    },
+    {
+     "run_id": 1,
+     "seq": 6,
+     "type": "tool_call",
+     "action": "agent:secret-scanner",
+     "allowed": true,
+     "payload_redacted": {
+      "mcp_tool": "agent__secret-scanner",
+      "args": {
+       "text": "{\"repo\": \"nmc2/infra\", \"number\": 42, \"title\": \"Add S3 bucket for build artifacts\", \"author\": \"bob\", \"diff\": \"diff --git a/infra/main.tf b/infra/main.tf\\n@@ -1,3 +1,12 @@\\n+provider \\\"aws\\\" {\\n+  region     = \\\"us-east-1\\\"\\n+  access_key = \\\"[REDACTED:known_secret]\\\"\\n+  secret_key = \\\"[REDACTED:known_secret]\\\"\\n+}\\n+resource \\\"aws_s3_bucket\\\" \\\"artifacts\\\" {\\n+  bucket = \\\"nmc2-build-artifacts\\\"\\n+  acl    = \\\"public-read\\\"\\n+}\\n\"}"
+      },
+      "result_summary": "{\"findings\": [{\"file\": \"infra/main.tf\", \"line\": 5, \"kind\": \"known_secret\", \"confidence\": 0.97}, {\"file\": \"infra/main.tf\", \"line\": 6, \"kind\": \"known_secret\", \"confidence\": 0.97}]}",
+      "duration_ms": 97,
+      "error": null
+     }
+    },
+    {
+     "run_id": 1,
+     "seq": 7,
+     "type": "span_close",
+     "action": "agent:secret-scanner",
+     "allowed": null,
+     "payload_redacted": {
+      "span_id": "3da02c9a4b1742cb",
+      "parent_span_id": "ecea4f974d2547cd",
+      "name": "agent:secret-scanner",
+      "child_run_id": 2,
+      "status": "succeeded",
+      "cost_usd": 0.0004
+     },
+     "span_id": "3da02c9a4b1742cb",
+     "parent_span_id": "ecea4f974d2547cd"
+    },
+    {
+     "run_id": 1,
+     "seq": 8,
+     "type": "model_call",
+     "action": null,
+     "allowed": null,
+     "payload_redacted": {
+      "model": "qwen-coder",
+      "openrouter_model": "fake/qwen/qwen3-coder-30b-a3b-instruct",
+      "input_tokens": 421,
+      "output_tokens": 20,
+      "cost_usd": 0.0004,
+      "cumulative_cost_usd": 0.0012,
+      "latency_ms": 4,
+      "fallback_used": false,
+      "finish_reason": "tool_calls"
+     }
+    },
+    {
+     "run_id": 1,
+     "seq": 9,
+     "type": "approval_requested",
+     "action": "github:pulls.comment",
+     "allowed": null,
+     "payload_redacted": {
+      "approval_id": 1,
+      "action": "github:pulls.comment",
+      "risk": "write",
+      "expires_at": "2026-10-25T11:46:29.564031+00:00"
+     }
+    },
+    {
+     "run_id": 1,
+     "seq": 10,
+     "type": "approval_decided",
+     "action": "github:pulls.comment",
+     "allowed": null,
+     "payload_redacted": {
+      "approval_id": 1,
+      "decision": "approved",
+      "approver": "bob"
+     }
+    },
+    {
+     "run_id": 1,
+     "seq": 11,
+     "type": "span_open",
+     "action": null,
+     "allowed": null,
+     "payload_redacted": {
+      "span_id": "resume-1",
+      "parent_span_id": null,
+      "name": "pr-reviewer (resumed)"
+     },
+     "span_id": "resume-1",
+     "parent_span_id": null
+    },
+    {
+     "run_id": 1,
+     "seq": 12,
+     "type": "tool_call",
+     "action": "github:pulls.comment",
+     "allowed": true,
+     "payload_redacted": {
+      "mcp_tool": "github__pulls_comment",
+      "args": {
+       "repo": "nmc2/infra",
+       "pr_number": 42,
+       "body": "Review of nmc2/infra#42: Add S3 bucket for build artifacts.\n- infra/main.tf: aws_s3_bucket.artifacts uses acl public-read. Make the bucket private.\n- secret-scanner: {\"findings\": [{\"file\": \"infra/main.tf\", \"line\": 5, \"kind\": \"known_secret\", \"confidence\": 0.97}, {\"file\": \"infra/main.tf\", \"line\": 6, \"kind\": \"known_secret\", \"confidence\": 0.97}]}\nDiff reviewed:\ndiff --git a/infra/main.tf b/infra/main.tf\n@@ -1,3 +1,12 @@\n+provider \"aws\" {\n+  region     = \"us-east-1\"\n+  access_key = \"[REDACTED:known_secret]\"\n+  secret_key = \"[REDACTED:known_secret]\"\n+}\n+resource \"aws_s3_bucket\" \"artifacts\" {\n+  bucket = \"nmc2-build-artifacts\"\n+  acl    = \"public-read\"\n+}\n"
+      },
+      "resource": "nmc2/infra",
+      "result_summary": "{\"ok\": true, \"comment_id\": 9001, \"repo\": \"nmc2/infra\", \"pr_number\": 42}",
+      "duration_ms": 0,
+      "error": null
+     }
+    },
+    {
+     "run_id": 1,
+     "seq": 13,
+     "type": "model_call",
+     "action": null,
+     "allowed": null,
+     "payload_redacted": {
+      "model": "qwen-coder",
+      "openrouter_model": "fake/qwen/qwen3-coder-30b-a3b-instruct",
+      "input_tokens": 440,
+      "output_tokens": 194,
+      "cost_usd": 0.0004,
+      "cumulative_cost_usd": 0.0016,
+      "latency_ms": 5,
+      "fallback_used": false,
+      "finish_reason": "stop"
+     }
+    },
+    {
+     "run_id": 1,
+     "seq": 14,
+     "type": "span_close",
+     "action": null,
+     "allowed": null,
+     "payload_redacted": {
+      "span_id": "resume-1",
+      "parent_span_id": null,
+      "name": "pr-reviewer",
+      "status": "succeeded",
+      "cost_usd": 0.002,
+      "output": "Review of nmc2/infra#42: Add S3 bucket for build artifacts.\n- infra/main.tf: aws_s3_bucket.artifacts uses acl public-read. Make the bucket private.\n- secret-scanner: {\"findings\": [{\"file\": \"infra/main.tf\", \"line\": 5, \"kind\": \"known_secret\", \"confidence\": 0.97}, {\"file\": \"infra/main.tf\", \"line\": 6, \"kind\": \"known_secret\", \"confidence\": 0.97}]}\nDiff reviewed:\ndiff --git a/infra/main.tf b/infra/main.tf\n@@ -1,3 +1,12 @@\n+provider \"aws\" {\n+  region     = \"us-east-1\"\n+  access_key = \"[REDACTED:known_secret]\"\n+  secret_key = \"[REDACTED:known_secret]\"\n+}\n+resource \"aws_s3_bucket\" \"artifacts\" {\n+  bucket = \"nmc2-build-artifacts\"\n+  acl    = \"public-read\"\n+}\n\n\nPosted the review to the pull request.",
+      "error": null
+     },
+     "span_id": "resume-1",
+     "parent_span_id": null
+    }
+   ]
+  },
+  "2": {
+   "run_id": 2,
+   "children": [],
+   "events": [
+    {
+     "run_id": 2,
+     "seq": 0,
+     "type": "span_open",
+     "action": null,
+     "allowed": null,
+     "payload_redacted": {
+      "span_id": "e2df013fd24e4d63",
+      "parent_span_id": "ecea4f974d2547cd",
+      "name": "secret-scanner",
+      "agent": "secret-scanner",
+      "version": "1.1.0",
+      "trigger": "agent"
+     },
+     "span_id": "e2df013fd24e4d63",
+     "parent_span_id": "ecea4f974d2547cd"
+    },
+    {
+     "run_id": 2,
+     "seq": 1,
+     "type": "model_call",
+     "action": null,
+     "allowed": null,
+     "payload_redacted": {
+      "model": "gpt-mini",
+      "openrouter_model": "fake/openai/gpt-5-mini",
+      "input_tokens": 233,
+      "output_tokens": 64,
+      "cost_usd": 0.0004,
+      "cumulative_cost_usd": 0.0004,
+      "latency_ms": 4,
+      "fallback_used": false,
+      "finish_reason": "stop"
+     }
+    },
+    {
+     "run_id": 2,
+     "seq": 2,
+     "type": "span_close",
+     "action": null,
+     "allowed": null,
+     "payload_redacted": {
+      "span_id": "e2df013fd24e4d63",
+      "parent_span_id": "ecea4f974d2547cd",
+      "name": "secret-scanner",
+      "status": "succeeded",
+      "cost_usd": 0.0004,
+      "output": "{\"findings\": [{\"file\": \"infra/main.tf\", \"line\": 5, \"kind\": \"known_secret\", \"confidence\": 0.97}, {\"file\": \"infra/main.tf\", \"line\": 6, \"kind\": \"known_secret\", \"confidence\": 0.97}]}",
+      "error": null
+     },
+     "span_id": "e2df013fd24e4d63",
+     "parent_span_id": "ecea4f974d2547cd"
+    }
+   ]
+  }
+ }
+}
