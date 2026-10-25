@@ -1,0 +1,29 @@
+# OPTIONAL. The primary database is Tiger Cloud, which is remote, so you do not
+# need Docker to build this. On the three Windows laptops, Docker Desktop wants
+# WSL2 and possibly a reboot, so do not install it unless the cloud fails.
+#
+# This exists as the H4 fallback: the same migration, locally.
+#
+#   docker compose up -d db
+#   psql postgresql://postgres:postgres@localhost:5432/reagent -v ON_ERROR_STOP=1 \
+#        -f contracts/db/001_init.sql
+
+services:
+  db:
+    # MUST be a Timescale image. The pgvector image has no timescaledb and an
+    # empty shared_preload_libraries, so create_hypertable fails. Start from
+    # Timescale and add vector, never the reverse.
+    image: timescale/timescaledb-ha:pg17
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: reagent
+    ports: ['5432:5432']
+    volumes: ['reagent-db:/home/postgres/pgdata']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d reagent']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  reagent-db:

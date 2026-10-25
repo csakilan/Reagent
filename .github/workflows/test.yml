@@ -1,0 +1,54 @@
+name: tests
+
+on:
+  push:
+    branches: ['wf/**', 'integ/**', 'main']
+  pull_request:
+
+jobs:
+  spec:
+    name: spec examples still validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install -q pyyaml jsonschema
+      # This must stay green on every branch. If an agent edits an example and
+      # breaks it, the demo data breaks with it.
+      - run: python spec/tools/check_examples.py spec
+
+  schema:
+    name: database schema applies
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: timescale/timescaledb-ha:pg17
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: reagent }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply 001_init.sql
+        env: { PGPASSWORD: postgres }
+        run: |
+          psql -h localhost -U postgres -d reagent -v ON_ERROR_STOP=1 \
+               -f contracts/db/001_init.sql
+          COUNT=$(psql -h localhost -U postgres -d reagent -At \
+                  -c "select count(*) from information_schema.tables where table_schema='public'")
+          echo "tables: $COUNT"
+          [ "$COUNT" -ge 18 ] || { echo "::error::expected at least 18 tables, got $COUNT"; exit 1; }
+
+  unit:
+    name: unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install -q pyyaml jsonschema pytest
+      - name: Run unit tests if any exist
+        run: |
+          if [ -d tests/unit ] && ls tests/unit/test_*.py >/dev/null 2>&1; then
+            python -m pytest tests/unit -q
+          else
+            echo "no unit tests yet"
+          fi

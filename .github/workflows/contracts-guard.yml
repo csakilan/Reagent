@@ -1,0 +1,63 @@
+name: contracts guard
+
+# Why this exists: I have write but not admin on this repo, so there is no
+# branch protection. A contract edit on a workflow branch silently breaks the
+# other three agents. This turns that into a red check instead.
+
+on:
+  push:
+    branches: ['wf/**', 'integ/**']
+  pull_request:
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Did this branch touch contracts/?
+        id: changed
+        run: |
+          git fetch origin main --quiet
+          CHANGED=$(git diff --name-only origin/main...HEAD -- contracts/ || true)
+          if [ -n "$CHANGED" ]; then
+            echo "files<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$CHANGED"    >> "$GITHUB_OUTPUT"
+            echo "EOF"         >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Refuse unapproved contract changes
+        if: steps.changed.outputs.files != ''
+        run: |
+          echo "::error::This branch changes frozen contracts."
+          echo "$ "
+          echo "${{ steps.changed.outputs.files }}"
+          echo "$ "
+          echo "contracts/ is consumed by all four workflows. Changing it here"
+          echo "breaks the other three agents silently."
+          echo "$ "
+          echo "If the contract is genuinely wrong, that is a real finding:"
+          echo "  1. stop"
+          echo "  2. state the problem and the proposed change in your report"
+          echo "  3. a human makes the change on main and tells the other agents"
+          echo "$ "
+          echo "To override deliberately, add the label 'contract-change' to the PR."
+          exit 1
+
+      - name: Contracts still valid
+        if: always()
+        run: |
+          python -m pip install -q pyyaml jsonschema
+          python - <<'PY'
+          import json, sys
+          from jsonschema import Draft202012Validator
+          for f in ("contracts/resolved_spec.schema.json",):
+              Draft202012Validator.check_schema(json.load(open(f)))
+              print(f"{f}: valid")
+          json.load(open("contracts/connector_actions.json"))
+          print("contracts/connector_actions.json: parses")
+          PY
+          python scripts/gen_connector_actions.py
+          git diff --exit-code contracts/connector_actions.json \
+            || { echo "::error::connector_actions.json is stale. Run scripts/gen_connector_actions.py and commit."; exit 1; }

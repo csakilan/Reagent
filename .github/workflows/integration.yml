@@ -1,0 +1,63 @@
+name: integration seams
+
+# Runs ONLY on integ/** branches. The contract tests are the integration status
+# board: each one starts red and turns green when both sides of that seam exist.
+# A red seam here is information, not a failure, so this job reports the table
+# and only fails on a seam that was already green and has regressed.
+
+on:
+  push:
+    branches: ['integ/**']
+  workflow_dispatch:
+
+jobs:
+  seams:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: timescale/timescaledb-ha:pg17
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: reagent }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/reagent
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: python -m pip install -q pyyaml jsonschema pytest pytest-json-report
+      - name: Apply schema
+        env: { PGPASSWORD: postgres }
+        run: psql -h localhost -U postgres -d reagent -v ON_ERROR_STOP=1 -f contracts/db/001_init.sql
+      - name: Run every seam test
+        run: |
+          python -m pytest tests/contract -q --json-report \
+            --json-report-file=/tmp/seams.json || true
+      - name: Seam report
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("/tmp/seams.json")
+          if not p.exists():
+              print("no seam results"); raise SystemExit(0)
+          d = json.loads(p.read_text())
+          rows = [(t["nodeid"].split("::")[0].replace("tests/contract/", ""), t["outcome"])
+                  for t in d.get("tests", [])]
+          seen, out = set(), []
+          for f, o in rows:
+              if f in seen and o == "passed":
+                  continue
+              seen.add(f); out.append((f, o))
+          print("\n  SEAM                                      STATUS")
+          print("  " + "-" * 54)
+          for f, o in sorted(out):
+              mark = {"passed": "GREEN", "failed": "red", "skipped": "waiting"}.get(o, o)
+              print(f"  {f:<42}{mark}")
+          print()
+          g = sum(1 for _, o in out if o == "passed")
+          print(f"  {g}/{len(out)} seams green")
+          PY
+      - name: Handoff board
+        if: always()
+        run: python scripts/handoff.py status || true

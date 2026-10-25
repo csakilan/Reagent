@@ -1,0 +1,24 @@
+name: integration lock
+
+# The other stop: while two workflows are being tested together on an integ/
+# branch, the contributing workflows are frozen. This makes the freeze visible
+# as a red check with the reason on it, rather than a rule nobody remembers.
+
+on:
+  push:
+    branches: ['wf/**']
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: python -m pip install -q pyyaml
+      - name: Is this workflow frozen?
+        run: |
+          git fetch origin main --quiet
+          python scripts/handoff.py check-lock "${GITHUB_REF#refs/heads/}"
+      - name: Handoff board
+        if: always()
+        run: python scripts/handoff.py status || true
