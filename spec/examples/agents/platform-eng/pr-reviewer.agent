@@ -92,6 +92,7 @@ spec:
   memory:
     - { bucket: platform-eng-notes, mode: read }
     - { bucket: platform-eng-runbooks, mode: read }
+    - { bucket: platform-eng-history, mode: read }
   observability:
     metrics: [issues_found, secrets_flagged]
     alerts:
