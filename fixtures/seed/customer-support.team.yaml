@@ -1,0 +1,23 @@
+apiVersion: reagent/v0
+kind: Team
+metadata:
+  name: customer-support
+  description: Customer Support demo team with access to its own FAQ only.
+spec:
+  members: [ivy, jules]
+  approvers: [ivy]
+  prompt: Answer from the support FAQ and escalate unresolved questions to a person.
+  models:
+    allow: [gpt-mini, gpt-oss]
+  connectors:
+    memory:
+      allow: [read, search]
+  limits:
+    usd_per_month: 25
+    max_concurrent_runs: 3
+  memory:
+    buckets:
+      - name: customer-support-faq
+        type: semantic
+        read: [customer-support]
+        write: [customer-support]

@@ -4,6 +4,8 @@ __pycache__/
 venv/
 .env
 .env.local
+tiger-cloud-*-credentials.*
+.secrets/
 node_modules/
 .next/
 out/
