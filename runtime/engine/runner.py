@@ -371,7 +371,14 @@ def _refused(recorder: Recorder, spec: dict[str, Any] | None, err: ReAgentError,
         if recorder.run_id is not None:
             recorder.event("policy_violation", payload={"code": r.code.value, "field": r.field,
                                                         "blocked_by": r.blocked_by, "message": r.message})
-    msg = "; ".join(f"{r.code.value}: {r.message}" for r in err.rejections)
+    def text(r: Rejection) -> str:
+        # Codes without a MESSAGES template render generically and would drop
+        # the detail (E_CONNECTOR_ERROR did); keep what was attempted.
+        m = r.message
+        if r.attempted is not None and str(r.attempted) not in m:
+            m += f" Detail: {r.attempted}"
+        return f"{r.code.value}: {m}"
+    msg = recorder.redactor.redact_text("; ".join(text(r) for r in err.rejections))[0]
     if recorder.run_id is not None:
         recorder.finish_run(status=status, cost_usd=0.0, input_tokens=0, output_tokens=0,
                             steps=0, error=msg)
