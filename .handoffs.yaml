@@ -109,7 +109,7 @@ handoffs:
       wrapper and never in model context, against the test repo holding the
       planted AWS key.
     verify: "pytest tests/contract/test_connector_actions.py -q"
-    status: pending
+    status: "ready"
     deadline: "2026-10-25T07:00:00-05:00"
     fallback: "HARD FALLBACK. Past 07:00 wf/runtime stays on fakes/github_wrapper.py permanently. Live GitHub moves to integ/all only, and demo step 6 uses the pre-recorded video."
 
