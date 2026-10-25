@@ -135,7 +135,7 @@ handoffs:
       writes an approvals row, and resumes to completion after
       POST /v0/approvals/{id} approves it.
     verify: "pytest tests/contract/test_approval_pause_resume.py -q"
-    status: pending
+    status: "ready"
     deadline: "2026-10-25T08:00:00-05:00"
     fallback: "fixtures/approvals.json. The queue screen renders seeded rows and approval is demoed as a state change only."
 
