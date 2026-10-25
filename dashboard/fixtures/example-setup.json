@@ -1,0 +1,45 @@
+{
+  "label": "EXAMPLE DATA · LOCAL PREVIEW ONLY",
+  "enterprise": {
+    "name": "NMC2",
+    "admins": ["frank", "grace"],
+    "models": ["*"],
+    "connectors": ["github:* (deny repos.delete, branches.force_push)", "slack:*", "memory:*", "platform:* (enterprise agents only)"],
+    "triggers": ["http", "mcp", "schedule", "github", "slack", "agent"],
+    "guardrails": ["secret redaction required", "PII redaction required", "approval required for destructive risk", "audit log enabled"],
+    "limits": { "usd_per_run": 2.0, "max_steps": 100, "timeout_seconds": 900, "max_concurrent_runs": 50 },
+    "trace_retention_days": 30
+  },
+  "teams": [
+    {
+      "name": "platform-eng",
+      "description": "Platform Engineering example team",
+      "members": ["alice", "bob", "carol"],
+      "approvers": ["alice"],
+      "models": ["qwen-coder", "claude-sonnet", "gpt-mini"],
+      "connectors": ["github: pulls.* and issues.*; repo scoped", "slack: messages.post; #platform-eng* scoped", "memory: team buckets"],
+      "guardrails": ["approval required for write and destructive risk"],
+      "limits": { "usd_per_month": 200, "max_concurrent_runs": 5 },
+      "agents": [
+        { "name": "pr-reviewer", "version": "1.0.0", "model": "qwen-coder", "tools": ["github:pulls.read", "github:pulls.comment", "agent:secret-scanner"], "budget": "$0.25 / run", "purpose": "Reviews infrastructure pull requests and flags defects or exposed secrets.", "source": "spec example" },
+        { "name": "code-reviewer", "version": "1.2.0", "model": "claude-sonnet", "tools": ["github:pulls.read"], "budget": "$0.50 / run", "purpose": "Reviews platform API pull requests for bugs and security issues.", "source": "spec example" },
+        { "name": "release-notes", "version": "0.1.0", "model": "gpt-mini", "tools": ["github:pulls.read", "memory:search"], "budget": "$0.10 / run", "purpose": "Drafts release notes from merged pull requests and team runbooks.", "source": "illustrative example" }
+      ]
+    },
+    {
+      "name": "people-ops",
+      "description": "People Operations example team",
+      "members": ["dana", "eli"],
+      "approvers": ["dana"],
+      "models": ["claude-sonnet", "gpt-mini", "gpt-oss"],
+      "connectors": ["slack: messages.*, reactions.add, users.read, channels.list; approved channels", "memory: team buckets"],
+      "guardrails": ["escalate compensation, performance, and HR case questions"],
+      "limits": { "usd_per_month": 50, "max_concurrent_runs": 10 },
+      "agents": [
+        { "name": "people-ops-bot", "version": "1.0.0", "model": "gpt-mini", "tools": ["slack:messages.read", "slack:messages.post", "slack:reactions.add", "memory:search"], "budget": "$0.05 / run", "purpose": "Answers routine handbook questions and hands sensitive topics to a person.", "source": "spec example" },
+        { "name": "handbook-guide", "version": "0.1.0", "model": "gpt-oss", "tools": ["memory:search", "slack:messages.read"], "budget": "$0.03 / run", "purpose": "Finds employee handbook guidance and cites the relevant section.", "source": "illustrative example" },
+        { "name": "onboarding-helper", "version": "0.1.0", "model": "gpt-mini", "tools": ["memory:search", "slack:messages.post"], "budget": "$0.05 / run", "purpose": "Answers new hire process questions using approved onboarding material.", "source": "illustrative example" }
+      ]
+    }
+  ]
+}
