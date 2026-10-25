@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reagent/v0/run_event",
+  "title": "ReAgent run event — FROZEN CONTRACT",
+  "description": "One row of the `run_events` table. Written by wf/runtime, read by wf/dashboard's trace viewer.\n\nTWO RULES THAT ARE NOT NEGOTIABLE.\n\n1. `payload_redacted` is named that way because redaction happens BEFORE the write, never on read. Nothing raw reaches this table. A secret that reaches the database has already lost the demo, because the trace viewer renders what is stored.\n\n2. `run_events.run_id` carries NO foreign key. `runs` is a hypertable with the composite primary key `(id, started_at)`, because every unique index on a hypertable must contain the partitioning column, so `runs(id)` alone is not a key anything can reference. Do not try to add the constraint; it will be rejected.\n\nSpans are modelled as paired `span_open` and `span_close` events sharing a `span_id`, which is how the waterfall gets its nesting and durations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type"],
+  "properties": {
+    "run_id": { "type": "integer" },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic within a run. The trace viewer orders by this, not by ts, because two events can share a timestamp."
+    },
+    "type": {
+      "enum": ["span_open", "span_close", "model_call", "tool_call",
+               "approval_requested", "approval_decided", "redaction_hit",
+               "policy_violation", "retry", "metric", "error"]
+    },
+    "action": {
+      "type": ["string", "null"],
+      "description": "Qualified permission string for a tool call ('github:pulls.comment') or 'agent:<name>' for a sub-agent call. Null for events that are not about an action. NOTE this is the INTERNAL permission string, not the MCP wire name."
+    },
+    "allowed": {
+      "type": ["boolean", "null"],
+      "description": "For tool_call only. FALSE means the call was refused by the wrap_tool_call middleware because it was outside the resolved permissions. The trace viewer must render a denial distinctly: it is the product working, and demo step 4 depends on it being visible."
+    },
+    "payload_redacted": {
+      "type": ["object", "null"],
+      "description": "Post-redaction detail. Shape depends on `type`; see $defs."
+    },
+    "ts": { "type": "string", "format": "date-time" },
+    "span_id": {
+      "type": ["string", "null"],
+      "description": "Present on span_open and span_close. Shared between the pair."
+    },
+    "parent_span_id": {
+      "type": ["string", "null"],
+      "description": "Gives the waterfall its indentation. Null at the root."
+    }
+  },
+  "$defs": {
+    "model_call": {
+      "type": "object",
+      "description": "payload_redacted for type: model_call. Cost comes from OpenRouter's response_metadata['cost'] and arrives only in the FINAL streaming chunk, so one of these is written per COMPLETED call. The budget kill-switch accumulates across these at turn boundaries.",
+      "properties": {
+        "model": { "type": "string" },
+        "openrouter_model": { "type": "string" },
+        "input_tokens": { "type": "integer" },
+        "output_tokens": { "type": "integer" },
+        "cost_usd": { "type": "number" },
+        "cumulative_cost_usd": { "type": "number" },
+        "latency_ms": { "type": "integer" },
+        "fallback_used": { "type": "boolean" },
+        "finish_reason": { "type": "string" }
+      }
+    },
+    "tool_call": {
+      "type": "object",
+      "description": "payload_redacted for type: tool_call.",
+      "properties": {
+        "mcp_tool": { "type": "string", "description": "The wire name actually called." },
+        "args": { "type": "object", "description": "Post-redaction arguments." },
+        "result_summary": { "type": "string", "description": "Never the full result; it may be large and may contain secrets." },
+        "resource": { "type": "string", "description": "The specific resource touched, e.g. nmc2/infra, for scope auditing." },
+        "duration_ms": { "type": "integer" },
+        "denial_code": { "type": "string", "pattern": "^E_[A-Z_]+$", "description": "Present when allowed is false." },
+        "error": { "type": ["string", "null"] }
+      }
+    },
+    "redaction_hit": {
+      "type": "object",
+      "description": "payload_redacted for type: redaction_hit. MUST NOT contain the matched text. Record what kind of thing was found and where, never the value.",
+      "properties": {
+        "pattern": { "type": "string", "description": "The rule name, e.g. aws_secret_access_key. NOT the match." },
+        "location": { "enum": ["model_output", "tool_result", "trace", "log"] },
+        "count": { "type": "integer" }
+      }
+    },
+    "approval_requested": {
+      "type": "object",
+      "properties": {
+        "approval_id": { "type": "integer" },
+        "action": { "type": "string" },
+        "risk": { "enum": ["read", "write", "destructive"] },
+        "expires_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "approval_decided": {
+      "type": "object",
+      "properties": {
+        "approval_id": { "type": "integer" },
+        "decision": { "enum": ["approved", "rejected", "expired"] },
+        "approver": { "type": ["string", "null"], "description": "Null when expired." }
+      }
+    },
+    "policy_violation": {
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "pattern": "^E_[A-Z_]+$" },
+        "field": { "type": "string" },
+        "blocked_by": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "description": "A custom counter from spec.observability.metrics. FROZEN D23: these are run_events rows aggregated at read time, because there is no metrics table.",
+      "properties": {
+        "name": { "type": "string" },
+        "value": { "type": "number" }
+      }
+    },
+    "retry": {
+      "type": "object",
+      "properties": {
+        "attempt": { "type": "integer" },
+        "reason": { "enum": ["timeout", "model_error", "connector_error"] }
+      }
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "fatal": { "type": "boolean" }
+      }
+    }
+  }
+}

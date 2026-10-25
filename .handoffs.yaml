@@ -51,7 +51,7 @@ handoffs:
       4 connectors, 4 models, 6+ agents with versions, and seeded run history.
     verify: "pytest tests/contract/test_db_schema.py -q"
     status: pending
-    deadline: "2026-10-25T03:30:00-05:00"
+    deadline: "2026-10-25T04:45:00-05:00"
     fallback: "Local Postgres in docker-compose running the same migration. Cloud becomes a connection-string swap."
 
   - id: H1
