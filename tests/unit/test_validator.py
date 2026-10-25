@@ -26,8 +26,15 @@ def found(rep, code):
     return [r for r in rep.rejections if r["code"] == code]
 
 
-def test_every_example_passes():
-    assert main([str(DEFAULT_SPEC_ROOT)]) == 0
+def test_every_example_passes_except_the_judge_only_one():
+    """code-reviewer is kept judge-only on purpose: tests/contract/test_eval_report.py
+    uses it as the FROZEN D8 example of a suite that cannot gate. pr-reviewer is
+    its fork with a real suite."""
+    from runtime.resolver.validate import validate_tree
+    reports = validate_tree(DEFAULT_SPEC_ROOT.resolve())
+    failing = {r.name: {x["code"] for x in r.rejections} for r in reports if not r.ok}
+    assert set(failing) == {"code-reviewer"}
+    assert "E_NO_GATING_CHECKS" in failing["code-reviewer"]
 
 
 def test_malformed_file_fails_with_a_readable_error_naming_the_field(cat):
