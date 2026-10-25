@@ -113,3 +113,16 @@ def test_full_pipeline_persists_and_publishes(store, cat):
     assert store.approved_hashes("pr-reviewer")
     with pytest.raises(ReAgentError):                       # a published version is immutable
         start("pr-reviewer", "alice", d, store=store, catalog=cat)
+
+
+def test_fork_lands_in_the_database_with_its_lineage(store, cat):
+    vid = store.create_draft(dict(copy.deepcopy(cat.latest("code-reviewer")),
+                                  metadata={"name": "pg-fork", "version": "0.1.0", "level": "team",
+                                            "team": "platform-eng", "forked_from": "code-reviewer@1.2.0"}),
+                             forked_from=("code-reviewer", "1.2.0"))
+    with psycopg.connect(URL) as c:
+        src = c.execute("SELECT a.name, s.version FROM agent_versions v JOIN agent_versions s "
+                        "ON s.id = v.forked_from_version_id JOIN agents a ON a.id = s.agent_id "
+                        "WHERE v.id = %s", (vid,)).fetchone()
+    assert src == ("code-reviewer", "1.2.0")
+    assert "pg-fork" in load_catalog_db(URL).agents

@@ -89,3 +89,23 @@ def test_every_wf2_route_is_served_by_the_runtime_app():
     assert c.get(f"/v0/publish-runs/{rid}", headers=H).status_code == 200
     assert c.post(f"/v0/publish-runs/{rid}/continue", headers=H).status_code == 409
     STORE.runs.clear()
+
+
+def test_fork_into_own_team_records_the_exact_source_version():
+    from runtime.resolver import source
+    source._DRAFTS.clear()
+    H = {"X-ReAgent-User": "bob"}
+    r = client.post("/v0/agents/code-reviewer/fork", json={"new_name": "bobs-reviewer"}, headers=H)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["forked_from"] == "code-reviewer@1.2.0" and body["team"] == "platform-eng"
+    assert body["rejections"] == [] and "forked_from: code-reviewer@1.2.0" in body["spec_yaml"]
+    # the fork is a real agent now: it resolves by name
+    assert get("bobs-reviewer", "bob").status_code == 200
+    assert client.post("/v0/agents/code-reviewer/fork", json={"new_name": "bobs-reviewer"},
+                       headers=H).status_code == 409
+    assert client.post("/v0/agents/people-ops-bot/fork", json={"new_name": "x"},
+                       headers=H).status_code == 404                 # not visible to platform-eng
+    assert client.post("/v0/agents/code-reviewer/fork", json={"new_name": "Bad Name"},
+                       headers=H).status_code == 422
+    source._DRAFTS.clear()

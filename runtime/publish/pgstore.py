@@ -80,6 +80,20 @@ class PgStore:
                          "VALUES (%s, %s, 'draft', %s) RETURNING id",
                          (agent_id, version, self._json(draft))).fetchone()[0]
 
+    def create_draft(self, doc: dict[str, Any], forked_from: tuple[str, str] | None = None) -> int:
+        """A new agent with one draft version (a fork). Returns the version id."""
+        with self._conn() as c:
+            src = None
+            if forked_from:
+                row = c.execute("SELECT v.id FROM agent_versions v JOIN agents a ON a.id = v.agent_id "
+                                "WHERE a.name = %s AND v.version = %s", forked_from).fetchone()
+                src = row[0] if row else None
+            aid = self._agent_id(c, doc)
+            return c.execute(
+                "INSERT INTO agent_versions (agent_id, version, status, spec, forked_from_version_id) "
+                "VALUES (%s, %s, 'draft', %s, %s) RETURNING id",
+                (aid, str(doc["metadata"]["version"]), self._json(doc), src)).fetchone()[0]
+
     # -- runs ----------------------------------------------------------------
     def create_run(self, agent: str, draft: dict[str, Any], started_by: str) -> dict[str, Any]:
         import psycopg

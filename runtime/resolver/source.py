@@ -114,6 +114,14 @@ def iter_documents(root: pathlib.Path):
             yield p, load_yaml(p)
 
 
+#: Drafts created in this process (forks) when there is no database to hold them.
+_DRAFTS: dict[str, dict[str, Any]] = {}
+
+
+def register_draft(doc: dict[str, Any]) -> None:
+    _DRAFTS[doc["metadata"]["name"]] = doc
+
+
 def load_catalog(root: str | os.PathLike | None = None) -> Catalog:
     """The layers, re-read on every call. REAGENT_LAYERS=db reads the database
     (SPEC.md §1); anything else, or an explicit `root`, reads a spec directory."""
@@ -172,4 +180,7 @@ def load_catalog_files(root: str | os.PathLike | None = None) -> Catalog:
     cat = Catalog(enterprise, teams, connectors, models, wire=load_wire())
     for a in agents:
         cat.add_agent(a)
+    for d in _DRAFTS.values():
+        if d["metadata"]["name"] not in cat.agents:
+            cat.add_agent(d)
     return cat

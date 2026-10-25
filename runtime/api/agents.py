@@ -15,13 +15,14 @@ from __future__ import annotations
 import argparse
 import copy
 import os
+import re
 from typing import Any
 
 import yaml
 from fastapi import APIRouter, Body, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 
-from contracts.errors import Code, ReAgentError
+from contracts.errors import Code, ReAgentError, Rejection
 from runtime.resolver import load_catalog, resolve_agent
 from runtime.resolver.source import Catalog
 from runtime.resolver.validate import validate_draft_text
@@ -207,6 +208,57 @@ def post_continue(run_id: int, x_reagent_user: str | None = Header(default=None)
         return view(proceed(run["id"]))
     except ReAgentError as e:
         return _refusal(e, 409)
+
+
+NAME = re.compile(r"^[a-z0-9-]+$")
+
+
+@router.post("/agents/{name}/fork", status_code=201)
+def post_fork(name: str, body: dict[str, Any] = Body(...),
+              x_reagent_user: str | None = Header(default=None)):
+    """Fork a team agent into the caller's team as a new draft. SPEC.md §12, FROZEN D24:
+    `forked_from` records the source's EXACT version, never a range."""
+    from runtime.resolver import resolve_document
+    from runtime.resolver.source import register_draft
+
+    cat = load_catalog()
+    user, is_admin, team = _principal(cat, x_reagent_user)
+    src = cat.latest(name)
+    if src is None or not _visible(src, is_admin, team):
+        raise HTTPException(404, "not found")
+    if src["metadata"].get("level") != "team":
+        raise HTTPException(422, "only team agents can be forked")
+    target = team or src["metadata"].get("team")
+    if not is_admin and src["metadata"].get("team") != team:
+        return JSONResponse(status_code=403, content={"rejections": [Rejection(
+            Code.FORK_OUTSIDE_TEAM, "metadata.forked_from", f"team:{team}", attempted=name).to_dict()]})
+    new_name = (body or {}).get("new_name", "")
+    if not NAME.match(new_name or ""):
+        raise HTTPException(422, "new_name must match ^[a-z0-9-]+$")
+    if cat.agent_versions(new_name):
+        raise HTTPException(409, f"an agent called {new_name} already exists")
+
+    doc = copy.deepcopy(src)
+    md = doc["metadata"]
+    md.update(name=new_name, version="0.1.0", team=target,
+              forked_from=f"{name}@{src['metadata']['version']}")
+    doc["spec"].setdefault("ownership", {})["owners"] = [user]
+    resolved = resolve_document(doc, catalog=cat, caller=None)
+
+    if os.environ.get("REAGENT_LAYERS", "files").lower() == "db":
+        from runtime.publish.pgstore import PgStore
+        PgStore().create_draft(doc, forked_from=(name, str(src["metadata"]["version"])))
+    else:
+        register_draft(doc)
+    spec = doc["spec"]
+    return {"name": new_name, "version": md["version"], "status": "draft", "team": target,
+            "level": "team", "description": spec.get("use_case", {}).get("description", ""),
+            "desired_outcome": spec.get("use_case", {}).get("desired_outcome"),
+            "tags": md.get("tags", []), "forked_from": md["forked_from"], "update_available": False,
+            "spec_yaml": yaml.safe_dump(doc, sort_keys=False),
+            "versions": [{"version": md["version"], "status": "draft", "published_at": None,
+                          "published_by": None}],
+            "rejections": resolved["rejections"]}
 
 
 def create_app() -> FastAPI:
