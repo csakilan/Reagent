@@ -149,3 +149,7 @@ export const runTriage = (id: number) => untyped("GET", `/v0/runs/${id}/triage`)
 /** cost-optimizer: the same approved tests on the team's other models; cheapest that passes. */
 export type CostCheck = { advice: string; recommendation: string | null; runs_per_case: number; options: { model: string; pass_rate: number; avg_cost: number; gate_blocked: boolean; current: boolean }[] };
 export const costCheck = (id: number) => untyped("POST", `/v0/publish-runs/${id}/cost-check`);
+
+/** Recent top-level runs the caller may see, newest first (filtered on the server). */
+export type RunRow = { run_id: number; agent: string; status: string; trigger: string; user: string | null; started_at: string | null; cost_usd: number; error: string | null };
+export const recentRuns = (limit = 15) => untyped("GET", `/v0/runs?limit=${limit}`);

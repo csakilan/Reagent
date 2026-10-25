@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { agentDetail, call, listAgents, runResult, runTriage, startRun, traceForRun, type Triage, type AgentSummary, type Rejection, type RunEvent, type RunResult, type Trace } from "../../lib/api";
+import { agentDetail, call, listAgents, recentRuns, runResult, runTriage, startRun, traceForRun, type RunRow, type Triage, type AgentSummary, type Rejection, type RunEvent, type RunResult, type Trace } from "../../lib/api";
 import { recordedAgents, recordedRun, recordedTrace } from "../../lib/fixtures";
 import { useDemoUser, useLive } from "../../lib/live";
-import { Failure, Icon, KeyValues, PageHead, Payload, Rejections, Skeleton, SourceTag, Verdict, usd } from "../ui";
+import { Failure, Icon, KeyValues, PageHead, Payload, Rejections, Skeleton, SourceTag, Verdict, usd, when } from "../ui";
 
 type Detail = Record<string, unknown>;
 type Row = { event: RunEvent; runId: number; depth: number; start: number; duration: number };
@@ -151,6 +151,26 @@ function summary(event: RunEvent): string {
   }
 }
 
+/** The latest runs the caller may see; each row opens its trace. */
+function RecentRuns() {
+  const user = useDemoUser();
+  const [state] = useLive<{ runs: RunRow[] }>(user ? `recent:${user}` : null, () => recentRuns());
+  if (state.phase === "loading") return <Skeleton rows={4} columns={3} label="Loading recent runs" />;
+  if (state.phase === "error") return <Failure state={state} />;
+  if (!state.data.runs.length) return <p className="muted">No runs yet. Start one on the left.</p>;
+  return <div className="table compact-table recent-runs">
+    <div className="table-head"><span>Run</span><span>Agent</span><span>Status</span><span>When</span></div>
+    {state.data.runs.map(r => <Link className="table-row" key={r.run_id} href={`/traces?run=${r.run_id}`}>
+      <span className="mono">#{r.run_id}</span>
+      <span><code>{r.agent}</code><small>{r.trigger}{r.user ? ` · ${r.user}` : ""}</small></span>
+      <span>{r.status === "succeeded" ? <Verdict kind="pass">succeeded</Verdict>
+        : ["failed", "denied", "cancelled"].includes(r.status) ? <Verdict kind="fail">{r.status}</Verdict>
+        : <Verdict kind="pending">{r.status.replace("_", " ")}</Verdict>}</span>
+      <span className="muted">{r.started_at ? when(r.started_at) : "just now"}</span>
+    </Link>)}
+  </div>;
+}
+
 function RunForm({ initialAgent }: { initialAgent: string }) {
   const router = useRouter();
   const user = useDemoUser();
@@ -196,12 +216,9 @@ function RunForm({ initialAgent }: { initialAgent: string }) {
       {problem && (problem.rejections.length ? <Rejections items={problem.rejections} title="Run refused" /> : <div className="notice notice-denied">{problem.detail}</div>)}
     </section>
     <section className="panel">
-      <h2>Open a run</h2>
-      <p className="panel-note">Sub-agent runs are nested under their parent automatically.</p>
-      <form className="inline-form" onSubmit={event => { event.preventDefault(); if (runId) router.push(`/traces?run=${runId}`); }}>
-        <input className="input" inputMode="numeric" placeholder="Run id" value={runId} onChange={event => setRunId(event.target.value.replace(/\D/g, ""))} aria-label="Run id" />
-        <button className="button" type="submit">Open</button>
-      </form>
+      <h2>Recent runs</h2>
+      <p className="panel-note">Runs your team can see, newest first. Open one to read its trace; failed runs explain themselves.</p>
+      <RecentRuns />
     </section>
   </div>;
 }

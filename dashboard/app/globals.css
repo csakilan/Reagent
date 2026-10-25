@@ -546,3 +546,6 @@ mark.redacted { padding: 0 4px; border-radius: 2px; background: var(--ink); colo
 .run-why ul { margin: 4px 0; padding-left: 18px; }
 
 .inheritance-title { margin: 0 0 10px; font-size: 16px; }
+
+.recent-runs .table-row { color: inherit; text-decoration: none; }
+.recent-runs .table-row:hover { background: var(--surface); }

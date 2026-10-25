@@ -994,6 +994,44 @@ def post_cost_check(run_id: int, x_reagent_user: str | None = Header(default=Non
             "recommendation": best["model"] if best else None, "advice": advice}
 
 
+@router.get("/runs", tags=["runs"])
+def get_runs(agent: str | None = None, limit: int = 25, x_reagent_user: str | None = Header(default=None)):
+    """Recent top-level runs the caller may see, newest first, so the trace viewer can
+    list them instead of asking for an id. Filtered on the SERVER (SPEC.md §2): a
+    member sees runs of their own team's agents only. Not in openapi.yaml yet."""
+    from runtime.engine.recorder import MEMORY, database_url
+    cat = load_catalog()
+    _, is_admin, team = _principal(cat, x_reagent_user)
+    limit = max(1, min(int(limit), 100))
+
+    def visible(name: str | None) -> bool:
+        doc = cat.latest(name) if name else None
+        return doc is not None and _visible(doc, is_admin, team) and (agent is None or name == agent)
+
+    out: list[dict[str, Any]] = []
+    if database_url():
+        import psycopg
+        with psycopg.connect(database_url(), connect_timeout=15) as c:
+            rows = c.execute(
+                "SELECT r.id, a.name, r.status, r.trigger, u.name, r.started_at, r.cost_usd, r.error "
+                "FROM runs r JOIN agent_versions v ON v.id = r.agent_version_id JOIN agents a ON a.id = v.agent_id "
+                "LEFT JOIN users u ON u.id = r.triggered_by WHERE r.parent_run_id IS NULL "
+                "ORDER BY r.started_at DESC LIMIT %s", (limit * 4,)).fetchall()
+        for rid, name, status, trigger, user, started, cost, error in rows:
+            if visible(name):
+                out.append({"run_id": rid, "agent": name, "status": status, "trigger": trigger, "user": user,
+                            "started_at": started.isoformat() if started else None,
+                            "cost_usd": float(cost or 0), "error": (error or "")[:160] or None})
+    else:
+        for rid in sorted(MEMORY, reverse=True):
+            r = MEMORY[rid]
+            if r.get("parent_run_id") is None and visible(r.get("agent")):
+                out.append({"run_id": rid, "agent": r.get("agent"), "status": r.get("status"),
+                            "trigger": r.get("trigger"), "user": r.get("user"), "started_at": None,
+                            "cost_usd": float(r.get("cost_usd") or 0), "error": (r.get("error") or "")[:160] or None})
+    return {"runs": out[:limit]}
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="ReAgent agents (wf/resolver)")
     app.include_router(router)
