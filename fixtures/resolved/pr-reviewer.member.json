@@ -83,7 +83,8 @@
           "resources": {
             "bucket": [
               "platform-eng-notes",
-              "platform-eng-runbooks"
+              "platform-eng-runbooks",
+              "platform-eng-history"
             ]
           },
           "auth": "service",
@@ -258,6 +259,14 @@
           "type": "procedural"
         },
         "source": "agent"
+      },
+      {
+        "value": {
+          "bucket": "platform-eng-history",
+          "mode": "read",
+          "type": "episodic"
+        },
+        "source": "agent"
       }
     ],
     "sub_agents": [
@@ -374,7 +383,8 @@
         "resources": {
           "bucket": [
             "platform-eng-notes",
-            "platform-eng-runbooks"
+            "platform-eng-runbooks",
+            "platform-eng-history"
           ]
         },
         "auth": "service",
@@ -389,7 +399,8 @@
         "resources": {
           "bucket": [
             "platform-eng-notes",
-            "platform-eng-runbooks"
+            "platform-eng-runbooks",
+            "platform-eng-history"
           ]
         },
         "auth": "service",

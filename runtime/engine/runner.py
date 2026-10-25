@@ -419,10 +419,14 @@ def _refused(recorder: Recorder, spec: dict[str, Any] | None, err: ReAgentError,
             "rejections": [r.to_dict() for r in err.rejections]}
 
 
-def _input_message(input: Any) -> dict[str, Any]:
-    # FROZEN D21: run input is always a separate user message.
+def _input_message(input: Any, memory: str | None = None) -> dict[str, Any]:
+    # FROZEN D21: run input is always a separate user message. Recalled memory
+    # follows it as its own message (FakeChatModel reads the FIRST as input).
     content = input if isinstance(input, str) else json.dumps(input, default=str)
-    return {"messages": [{"role": "user", "content": content}]}
+    messages = [{"role": "user", "content": content}]
+    if memory:
+        messages.append({"role": "user", "content": memory})
+    return {"messages": messages}
 
 
 # --------------------------------------------------------------------------
@@ -481,6 +485,11 @@ async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger:
                                         root_connector_headers(recorder, user)))
         _prerun_checks(spec, recorder, grants, p, user, trigger,
                        charge_team=charge_team, charge_team_cap_usd=charge_team_cap_usd)
+        memory = None
+        if p is None:
+            # Root runs only; checkpointed with the input, so resume never re-recalls.
+            from runtime.engine.memory_recall import safe_recall
+            memory = await safe_recall(spec, input, ctx.connector_headers, recorder, trigger)
         # Durable (Postgres) only when a pause could be resumed elsewhere. Eval
         # and gate runs (trigger "system") never resume across processes, so an
         # in-memory saver is safe and saves ~80 Tiger round trips per run.
@@ -490,7 +499,7 @@ async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger:
             built = await _build(spec, recorder, ctx, saver, grants)
             config = {"configurable": {"thread_id": f"run-{ctx.run_id}"},
                       "recursion_limit": max(25, (limit_steps or 25) * 4 + 10)}
-            out, drained = await _invoke(built.agent, _input_message(input), config, ctx)
+            out, drained = await _invoke(built.agent, _input_message(input, memory), config, ctx)
             return await _finalise(built, spec, recorder, ctx, config, out, drained)
     except ReAgentError as e:
         return _refused(recorder, spec, e)

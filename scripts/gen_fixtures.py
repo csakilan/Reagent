@@ -39,10 +39,16 @@ TEAM_PROMPT = (
     "suggest disabling tests. Follow docs/style-guide.md."
 )
 TASK_PROMPT = (
-    "Review the pull request. Read the diff with github:pulls.read.\n"
-    "Report bugs, security issues and style problems. Check Terraform changes for public\n"
-    "S3 buckets and open security groups. Before finishing, call agent:secret-scanner on the\n"
-    "diff and include its findings. Post the review with github:pulls.comment."
+    "Review the pull request by following these steps in order. Call each tool once.\n"
+    "1. Read the pull request and its diff with github:pulls.read.\n"
+    "2. Call agent:secret-scanner on the diff.\n"
+    "3. Write the review: bugs, security issues and style problems. Start every finding with\n"
+    "   the file path from the diff and the line, for example \"infra/main.tf:12 - ...\".\n"
+    "   Check Terraform changes for public S3 buckets and open security groups. Include the\n"
+    "   secret-scanner findings, by file and line, never the secret itself.\n"
+    "4. Post the full review with github:pulls.comment. This step is required: the task is\n"
+    "   not complete until the review is posted as a comment.\n"
+    "5. Only after posting, reply with a short summary of what you posted."
 )
 
 
@@ -52,7 +58,7 @@ def leaf(value, source, **kw):
     return d
 
 
-REPOS = ["nmc2/infra", "nmc2/platform-api"]
+REPOS = ["nmc2/infra", "nmc2/platform-api", "csakilan/reagent-demo"]
 
 admin = {
     "agent": "pr-reviewer",
@@ -84,14 +90,16 @@ admin = {
                   "resources": {"repo": REPOS},
                   "auth": "service"},
                  AG,
-                 narrowed_from={"actions": ["pulls.*", "issues.*", "contents.read"],
+                 narrowed_from={"actions": ["pulls.read", "pulls.comment", "issues.*",
+                                            "contents.read"],
                                 "from_layer": TEAM}),
             # FROZEN D12: expanded from `memory`, which the .agent file does not
             # list under tools. Without this the agent has no memory access and
             # the actions escape tool_coverage.
             leaf({"connector": "memory",
                   "actions": ["read", "search"],
-                  "resources": {"bucket": ["platform-eng-notes", "platform-eng-runbooks"]},
+                  "resources": {"bucket": ["platform-eng-notes", "platform-eng-runbooks",
+                                           "platform-eng-history"]},
                   "auth": "service",
                   "synthetic": True},
                  AG),
@@ -138,6 +146,7 @@ admin = {
         "memory": [
             leaf({"bucket": "platform-eng-notes", "mode": "read", "type": "semantic"}, AG),
             leaf({"bucket": "platform-eng-runbooks", "mode": "read", "type": "procedural"}, AG),
+            leaf({"bucket": "platform-eng-history", "mode": "read", "type": "episodic"}, AG),
         ],
         # FROZEN D24: @^1 resolved ONCE at publish. secret-scanner is at 1.1.0.
         "sub_agents": [leaf({"name": "secret-scanner", "version": "1.1.0"}, AG,
@@ -174,11 +183,13 @@ admin = {
              "auth": "service", "risk": "write", "requires_approval": True},
             {"permission": "memory:read", "connector": "memory", "action": "read",
              "mcp_tool": "read",
-             "resources": {"bucket": ["platform-eng-notes", "platform-eng-runbooks"]},
+             "resources": {"bucket": ["platform-eng-notes", "platform-eng-runbooks",
+                                      "platform-eng-history"]},
              "auth": "service", "risk": "read", "requires_approval": False},
             {"permission": "memory:search", "connector": "memory", "action": "search",
              "mcp_tool": "search",
-             "resources": {"bucket": ["platform-eng-notes", "platform-eng-runbooks"]},
+             "resources": {"bucket": ["platform-eng-notes", "platform-eng-runbooks",
+                                      "platform-eng-history"]},
              "auth": "service", "risk": "read", "requires_approval": False},
         ],
         # FROZEN D13: connectors.github.deny (bare globs, from enterprise) and

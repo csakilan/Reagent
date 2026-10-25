@@ -521,7 +521,7 @@ def test_d12_memory_expands_into_synthetic_tools(cat):
     assert len(mem) == 1 and mem[0]["value"]["synthetic"] is True
     assert mem[0]["value"]["actions"] == ["read", "search"]
     assert perm(doc, "memory:read")["resources"] == \
-        {"bucket": ["platform-eng-notes", "platform-eng-runbooks"]}
+        {"bucket": ["platform-eng-notes", "platform-eng-runbooks", "platform-eng-history"]}
     assert "memory:write" not in perms(doc)
 
 

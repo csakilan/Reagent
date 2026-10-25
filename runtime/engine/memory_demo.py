@@ -10,7 +10,8 @@
 
 Drives fixtures/memory/scenario.yaml: three pr-reviewer runs on platform-eng
 (A: PR 42 approved, B: merge request refused, C: PR 42 again), then the
-procedural eval gate, then the kill switch. Under the fake model the curator
+procedural eval gate, then recall (D: PR 42 again, reading what was learned),
+then the kill switch. Under the fake model the curator
 says exactly what the scenario scripts, so each proposal's outcome is known in
 advance and checked. The rest of the pipeline is the real one: the curator run
 (trigger=system, charged to the team), build_trace, validate_proposals, the
@@ -381,6 +382,75 @@ def act_procedural(runs: dict[str, dict[str, Any]], scn: dict[str, Any],
           f"{len(dups)} rows for the same lesson: procedures are not deduped yet", warn=True)
 
 
+def act_recall(runs: dict[str, dict[str, Any]], scn: dict[str, Any],
+               curator: ScriptedCurator | None, args: argparse.Namespace) -> None:
+    """Run D: memory flows back in. The message is captured at the real
+    safe_recall the runner calls, so this checks exactly what the model saw."""
+    from runtime.engine import memory_curation as mc
+    from runtime.engine import memory_recall as mr
+    from runtime.engine.recorder import Recorder
+    from runtime.guardrails.redaction import Redactor
+    print("\nRecall: the next run starts from what the team learned")
+    want = scn["runs"]["D"]["recall"]
+    captured: dict[int, str | None] = {}
+    real = mr.safe_recall
+
+    async def spy(spec: Any, input: Any, identity: Any, recorder: Any, trigger: str) -> str | None:
+        msg = await real(spec, input, identity, recorder, trigger)
+        captured[recorder.run_id] = msg
+        return msg
+    mr.safe_recall = spy  # type: ignore[assignment]
+    try:
+        d = run_one("D", scn, curator, args)
+        os.environ["REAGENT_MEMORY_RECALL"] = "off"
+        try:
+            off = run_one("D", scn, curator, args)
+        finally:
+            os.environ.pop("REAGENT_MEMORY_RECALL", None)
+    finally:
+        mr.safe_recall = real  # type: ignore[assignment]
+
+    msg = captured.get(d["run_id"]) or ""
+    rec_m = [m for m in metrics(d["run_id"]) if m.get("name") == "memory_recalled"]
+    detail = (rec_m[0].get("detail") or {}) if rec_m else {}
+    got_ids = {int(i) for ids in detail.values() for i in ids}
+    print("        " + msg.replace("\n", "\n        ")[:1200])
+    items = all_items([r["run_id"] for r in runs.values()])
+    if curator:
+        fact = [i["id"] for i in items if i["type"] == "semantic"
+                and i["source_run_id"] == runs["A"]["run_id"] and i["content"].startswith(want["fact"])]
+        promoted = [i["id"] for i in items if i["type"] == "procedural" and i["status"] == "active"
+                    and f"] {want['procedure']}." in i["content"]]
+        episodes = [i["id"] for i in items if i["type"] == "episodic"]
+        check("memory_recalled on run D lists run A's fact, the promoted procedure and an episode",
+              len(rec_m) == 1 and bool(fact) and set(fact) <= got_ids and bool(promoted)
+              and set(promoted) <= got_ids and bool(got_ids & set(episodes)),
+              f"{int(rec_m[0]['value']) if rec_m else 0} item(s): {detail}")
+        rejected_or_pending = [i["id"] for i in items if i["type"] == "procedural"
+                               and i["status"] in ("pending", "rejected")]
+        check("pending and rejected procedures are not recalled",
+              bool(rejected_or_pending) and not (got_ids & set(rejected_or_pending))
+              and not any(s in msg for s in want["never"]),
+              f"excluded items {rejected_or_pending}")
+    rec = Recorder(Redactor())
+    try:
+        trace = json.dumps([e.get("payload_redacted") for e in rec.events(d["run_id"])], default=str)
+    finally:
+        rec.close()
+    output = str(d["final"].get("output") or "")
+    blob = "\n".join([json.dumps(scn["runs"]["D"]["input"]), msg, trace, output])
+    check("no planted secret or directive in run D's messages, trace or output",
+          bool(msg) and not any(k in blob for k in scn["planted_secrets"])
+          and not mc.INJECTION.search(msg + "\n" + output) and not mc.INJECTION.search(trace))
+    if curator:
+        check("run D's review applies team memory", "Team memory applied" in output,
+              next((ln for ln in output.splitlines() if "Team memory" in ln), "no such line"))
+    check("with REAGENT_MEMORY_RECALL=off the same run gets no memory message",
+          off["run_id"] in captured and captured[off["run_id"]] is None
+          and not any(m.get("name") == "memory_recalled" for m in metrics(off["run_id"]))
+          and "Team memory applied" not in str(off["final"].get("output") or ""))
+
+
 def act_kill_switch(scn: dict[str, Any], curator: ScriptedCurator | None,
                     args: argparse.Namespace) -> None:
     print("\nKill switch: REAGENT_MEMORY=off")
@@ -445,6 +515,7 @@ def main() -> int:
     if curator:
         act_semantic(runs, scn)
     act_procedural(runs, scn, args)
+    act_recall(runs, scn, curator, args)
     act_kill_switch(scn, curator, args)
     show_memory([r["run_id"] for r in runs.values()])
 
