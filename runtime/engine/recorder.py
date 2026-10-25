@@ -208,6 +208,50 @@ class Recorder:
                               (run_id,)).fetchone()
         return {"status": row[0], "cost_usd": float(row[1]), "steps": row[2], "error": row[3]}
 
+    def events(self, run_id: int) -> list[dict[str, Any]]:
+        """All run_events rows for a run, in seq order (already redacted)."""
+        if not self.db:
+            return [dict(e) for e in MEMORY.get(run_id, {}).get("events", [])]
+        self.flush()
+        rows = self.db.execute(
+            "select seq, type, action, allowed, payload_redacted from run_events"
+            " where run_id=%s order by seq", (run_id,)).fetchall()
+        return [{"seq": s, "type": t, "action": a, "allowed": al, "payload_redacted": p}
+                for s, t, a, al, p in rows]
+
+    def run_row(self, run_id: int) -> dict[str, Any]:
+        """The run's own row with its agent, team and user names."""
+        if not self.db:
+            r = MEMORY[run_id]
+            return {k: r.get(k) for k in ("agent", "version", "team", "user", "trigger", "status",
+                                          "cost_usd", "steps", "error", "parent_run_id")} | {
+                "id": run_id, "latency_ms": None}
+        row = self.db.execute(
+            "select r.id, a.name, av.version, t.name, u.name, r.trigger, r.status, r.cost_usd,"
+            " r.steps, r.error, r.parent_run_id, r.latency_ms"
+            " from runs r join agent_versions av on av.id=r.agent_version_id"
+            " join agents a on a.id=av.agent_id left join teams t on t.id=r.team_id"
+            " left join users u on u.id=r.triggered_by where r.id=%s", (run_id,)).fetchone()
+        if not row:
+            raise KeyError(f"run {run_id} not found")
+        keys = ["id", "agent", "version", "team", "user", "trigger", "status", "cost_usd",
+                "steps", "error", "parent_run_id", "latency_ms"]
+        d = dict(zip(keys, row))
+        d["cost_usd"] = float(d["cost_usd"] or 0)
+        return d
+
+    def team_spend_today(self, team: str, agent: str) -> float:
+        """What `agent` has cost `team` since midnight UTC (curation's daily cap)."""
+        if not self.db:
+            return sum(float(v["cost_usd"]) for v in MEMORY.values()
+                       if v.get("team") == team and v.get("agent") == agent)
+        row = self.db.execute(
+            "select coalesce(sum(r.cost_usd),0) from runs r join agent_versions av"
+            " on av.id=r.agent_version_id join agents a on a.id=av.agent_id"
+            " join teams t on t.id=r.team_id where t.name=%s and a.name=%s"
+            " and r.started_at >= date_trunc('day', now())", (team, agent)).fetchone()
+        return float(row[0])
+
     def children_cost(self, run_id: int) -> float:
         """Total cost of every descendant run (runs.cost_usd is own-cost only)."""
         if not self.db:
