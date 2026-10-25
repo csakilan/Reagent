@@ -5,7 +5,11 @@ import json
 
 import pytest
 
-from runtime.evals import Trace, case_hash, compare, run_checks, wilson
+# runtime.evals drives the real runtime, so it imports LangChain. CI's unit job
+# installs only pyyaml, jsonschema and pytest: skip there rather than error.
+pytest.importorskip("langchain_core")
+
+from runtime.evals import Trace, case_hash, compare, run_checks, wilson  # noqa: E402
 from runtime.evals.stats import percentile
 
 

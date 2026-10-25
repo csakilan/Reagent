@@ -15,7 +15,7 @@ spec:
   tools:
     - connector: github
       actions: [pulls.read, pulls.comment]
-      resources: { repo: ["nmc2/infra", "nmc2/platform-api"] }
+      resources: { repo: ["nmc2/infra", "nmc2/platform-api", "csakilan/reagent-demo"] }
       auth: service
   sub_agents:
     - ref: secret-scanner@^1
@@ -70,7 +70,7 @@ spec:
         expect:
           no_tool_calls: ["github:pulls.merge"]
   triggers:
-    - { type: github, events: [pull_request.opened, pull_request.synchronize], repos: ["nmc2/infra", "nmc2/platform-api"] }
+    - { type: github, events: [pull_request.opened, pull_request.synchronize], repos: ["nmc2/infra", "nmc2/platform-api", "csakilan/reagent-demo"] }
     - { type: http }
     - { type: mcp }
   guardrails:
@@ -81,7 +81,8 @@ spec:
       Review the pull request. Read the diff with github:pulls.read.
       Report bugs, security issues and style problems. Check Terraform changes for public
       S3 buckets and open security groups. Before finishing, call agent:secret-scanner on the
-      diff and include its findings. Post the review with github:pulls.comment.
+      diff and include its findings. You MUST finish by posting the full review with
+      github:pulls.comment. Do not end with the review only in your answer.
   memory:
     - { bucket: platform-eng-notes, mode: read }
     - { bucket: platform-eng-runbooks, mode: read }

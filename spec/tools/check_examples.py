@@ -5,6 +5,10 @@ from jsonschema import Draft202012Validator
 
 root = sys.argv[1]
 schema = json.load(open(f"{root}/schema/reagent.schema.json"))
+# The schema's $id ("reagent/v0") is relative. Older jsonschema (the apt package
+# CI picks up) resolves it against itself and tries to fetch "reagent/reagent/v0".
+# An absolute id on the in-memory copy keeps every $ref local, on old and new.
+schema["$id"] = "urn:reagent:" + schema.get("$id", "schema")
 Draft202012Validator.check_schema(schema)
 V = Draft202012Validator(schema)
 

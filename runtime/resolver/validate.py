@@ -49,6 +49,9 @@ def schema_validator() -> Draft202012Validator:
     global _validator
     if _validator is None:
         schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        # A relative $id makes older jsonschema try to fetch "reagent/reagent/v0";
+        # an absolute id on the in-memory copy keeps every $ref local.
+        schema["$id"] = "urn:reagent:" + schema.get("$id", "schema")
         Draft202012Validator.check_schema(schema)
         _validator = Draft202012Validator(schema)
     return _validator

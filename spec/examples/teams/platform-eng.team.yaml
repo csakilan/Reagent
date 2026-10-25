@@ -12,7 +12,7 @@ spec:
   connectors:
     github:
       allow: [pulls.read, pulls.comment, "issues.*", contents.read]   # no pulls.merge: demo step 4
-      resources: { repo: ["nmc2/infra", "nmc2/platform-api"] }
+      resources: { repo: ["nmc2/infra", "nmc2/platform-api", "csakilan/reagent-demo"] }
     slack:
       allow: [messages.post]
       resources: { channel: ["#platform-eng*"] }
