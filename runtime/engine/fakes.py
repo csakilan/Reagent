@@ -162,6 +162,8 @@ class FakeChatModel(BaseChatModel):
     def _decide(self, messages: list[BaseMessage]) -> AIMessage:
         system = " ".join(str(m.content) for m in messages if isinstance(m, SystemMessage))
         human = next((str(m.content) for m in messages if isinstance(m, HumanMessage)), "")
+        memory = next((str(m.content) for m in messages
+                       if isinstance(m, HumanMessage) and "<<<MEMORY" in str(m.content)), None)
         called = [tc["name"] for m in messages if isinstance(m, AIMessage) for tc in m.tool_calls]
         results = {m.name: str(m.content) for m in messages if isinstance(m, ToolMessage)}
         try:
@@ -194,15 +196,15 @@ class FakeChatModel(BaseChatModel):
             return AIMessage(content="", tool_calls=[
                 call(sub, {"text": results.get("github__pulls_read", human)})])
         if "github__pulls_comment" in self.bound and "github__pulls_comment" not in called:
-            body = self._review(results, sub)
+            body = self._review(results, sub, memory)
             return AIMessage(content="", tool_calls=[
                 call("github__pulls_comment", {"repo": repo, "pr_number": pr, "number": pr,
                                                "body": body})])
-        return AIMessage(content=self._review(results, sub) +
+        return AIMessage(content=self._review(results, sub, memory) +
                          ("\n\nPosted the review to the pull request."
                           if "github__pulls_comment" in results else ""))
 
-    def _review(self, results: dict[str, str], sub: str | None) -> str:
+    def _review(self, results: dict[str, str], sub: str | None, memory: str | None = None) -> str:
         pr = results.get("github__pulls_read", "")
         lines = [f"Review of {_field(pr, 'repo')}#{_field(pr, 'number')}: "
                  f"{_field(pr, 'title') or 'pull request'}."]
@@ -211,6 +213,10 @@ class FakeChatModel(BaseChatModel):
                          "Make the bucket private.")
         if sub and sub in results:
             lines.append(f"- secret-scanner: {results[sub]}")
+        applied = _memory_applied(memory)
+        if applied:
+            # So the demo shows recalled memory changing the review.
+            lines.append(f"- Team memory applied: {applied}")
         # Echo the diff, as real models do when quoting. Redaction must have
         # already removed any credential from it.
         diff = _field(pr, "diff")
@@ -265,6 +271,19 @@ class FakeChatModel(BaseChatModel):
             if kind:
                 findings.append({"file": file, "line": n, "kind": kind, "confidence": 0.97})
         return AIMessage(content=json.dumps({"findings": findings}))
+
+
+def _memory_applied(block: str | None) -> str | None:
+    """The first recalled procedure's title, else the first fact."""
+    if not block:
+        return None
+    for section in ("Procedures:", "Facts:"):
+        lines = block.split("\n")
+        if section in lines:
+            first = lines[lines.index(section) + 1]
+            if first.startswith("- "):
+                return first[2:].split(". When:")[0].split(" [fact id ")[0]
+    return None
 
 
 def _field(blob: str, key: str) -> str:

@@ -374,6 +374,18 @@ class MemoryStore:
             out.setdefault(typ, name)
         return out
 
+    def bucket_types(self, names: list[str]) -> dict[str, str]:
+        """{bucket: type} for these bucket names, whoever owns them."""
+        if not names:
+            return {}
+        if not self.live or not database_url():
+            known = {n: t for b in FAKE_BUCKETS.values() for t, n in b.items()}
+            return {n: known[n] for n in names if n in known}
+        from runtime.engine.recorder import _shared_conn
+        rows = _shared_conn(database_url()).execute(
+            "select name, type from memory_buckets where name = any(%s)", (list(names),)).fetchall()
+        return {name: typ for name, typ in rows}
+
     # -- calls --------------------------------------------------------------
     async def _call(self, tool: str, args: dict[str, Any], *, system: bool = False) -> Any:
         from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -413,6 +425,14 @@ class MemoryStore:
             return [i for i in FAKE_ITEMS if i["bucket"] == bucket and i["status"] == "active"
                     and q & set(_norm(i["content"]).split())]
         res = await self._call("search", {"bucket": bucket, "query": query})
+        return res if isinstance(res, list) else []
+
+    async def read(self, bucket: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Latest active entries first, like the wrapper's read."""
+        if not self.live:
+            return [i for i in reversed(FAKE_ITEMS)
+                    if i["bucket"] == bucket and i["status"] == "active"][:limit]
+        res = await self._call("read", {"bucket": bucket, "limit": limit})
         return res if isinstance(res, list) else []
 
     async def is_duplicate(self, bucket: str, item: dict[str, Any]) -> bool:

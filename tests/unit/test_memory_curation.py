@@ -35,6 +35,8 @@ def _isolate(monkeypatch):
     monkeypatch.setenv("REAGENT_RESOLVER", "fake")
     monkeypatch.setenv("REAGENT_MEMORY", "sync")
     mc.FAKE_ITEMS.clear()
+    yield
+    mc.FAKE_ITEMS.clear()  # recall would read leftovers into later tests' runs
 
 
 def items(kind=None, run_id=None):
