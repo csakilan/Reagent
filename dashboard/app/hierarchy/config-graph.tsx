@@ -176,7 +176,7 @@ export default function ConfigGraph({ setup, initialAgent }: { setup: Setup; ini
       {selected.kind === "agent" && <>
         <DetailSection title="Agent"><DetailRows rows={[["File", `${selected.agent.name}.agent · ${selected.agent.version}`], ["Purpose", selected.agent.purpose],
           ["Model", selected.agent.model], ["Tools", text(selected.agent.tools)], ["Budget", selected.agent.budget]]} /></DetailSection>
-        <p className="graph-locked">Its full policy, agent first, then {selected.team.name}, then the enterprise, is below the graph.</p>
+        <p className="graph-locked">Its inheritance view, agent first, then {selected.team.name}, then the enterprise, is below the graph.</p>
         <div className="toolbar"><Link className="button" href={`/agents/${selected.agent.name}/edit`}>Edit</Link><Link className="button" href={`/traces?agent=${selected.agent.name}`}>Run</Link></div>
       </>}
       <div className="graph-detail-foot">Read-only. Team and enterprise layers are edited by enterprise admins, and every change applies on each agent’s next run.</div>

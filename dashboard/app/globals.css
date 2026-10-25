@@ -544,3 +544,5 @@ mark.redacted { padding: 0 4px; border-radius: 2px; background: var(--ink); colo
 .run-why h2 { margin: 0 0 6px; font-size: 14px; }
 .run-why p { margin: 4px 0; }
 .run-why ul { margin: 4px 0; padding-left: 18px; }
+
+.inheritance-title { margin: 0 0 10px; font-size: 16px; }

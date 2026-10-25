@@ -128,9 +128,10 @@ export default function ResolvedLayers({ agent, user }: { agent: string; user: s
   const groups = useMemo(() => spec ? groupByLayer(spec.provenance).sort((a, b) => ORDER.indexOf(a.layer) - ORDER.indexOf(b.layer)) : [], [spec]);
   const narrowed = groups.reduce((sum, g) => sum + g.settings.filter(s => s.kind === "limit").length, 0);
   const hidden = groups.reduce((sum, g) => sum + g.hidden, 0);
-  return <section className="resolved-in-graph" aria-label={`Resolved policy for ${agent}`}>
-    {state.phase === "loading" && <Skeleton rows={8} columns={3} label="Resolving policy" />}
+  return <section className="resolved-in-graph" aria-label={`Inheritance view for ${agent}`}>
+    {state.phase === "loading" && <Skeleton rows={8} columns={3} label="Loading the inheritance view" />}
     <Failure state={state} notFound={<><b>{agent}</b> is not visible to <b>{user}</b>.</>} />
+    <h2 className="inheritance-title">Inheritance view · {agent}</h2>
     {spec && <>
       <Rejections items={spec.rejections} title="This agent does not resolve" />
       <div className="resolved-intro">

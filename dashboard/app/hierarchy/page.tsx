@@ -16,8 +16,8 @@ function Hierarchy() {
   return <>
     <PageHead crumb="Policy / Hierarchy" title="Policy hierarchy"
       subtitle={state.phase === "ready" && !state.data.viewer.is_enterprise_admin
-        ? <>What <strong>{state.data.viewer.team}</strong> can see: your team and its agents, under an enterprise layer whose rules apply but stay hidden. Select an agent to see its full policy.</>
-        : "Enterprise, then teams, then agents. Each layer can only tighten the one above. Select an agent to see its full policy."} />
+        ? <>What <strong>{state.data.viewer.team}</strong> can see: your team and its agents, under an enterprise layer whose rules apply but stay hidden. Select an agent to see its inheritance view.</>
+        : "Enterprise, then teams, then agents. Each layer can only tighten the one above. Select an agent to see its inheritance view."} />
     {state.phase === "loading" && <Skeleton rows={10} columns={3} label="Loading hierarchy" />}
     <Failure state={state} />
     {state.phase === "ready" && <ConfigGraph key={`${user}:${agent ?? ""}`} setup={state.data} initialAgent={agent} />}

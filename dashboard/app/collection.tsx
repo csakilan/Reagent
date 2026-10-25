@@ -80,7 +80,7 @@ export default function Collection() {
         <span className="num">{usd(agent.avg_cost_usd)}</span>
         <span className="num">{agent.runs_30d ?? "—"}</span>
         <span className="row-actions">
-          <Link className="button" href={`/hierarchy?agent=${agent.name}`}>Policy</Link>
+          <Link className="button" href={`/agents/${agent.name}/edit`}>Open</Link>
           <button className="button" type="button" onClick={() => setDrawer({ fork: agent.name })}>Fork</button>
         </span>
       </div>)}
