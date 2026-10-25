@@ -530,3 +530,8 @@ mark.redacted { padding: 0 4px; border-radius: 2px; background: var(--ink); colo
 .impact .is-changed { background: var(--surface); }
 .request-field { flex: 1 1 420px; }
 .request-field .input { flex: 1; min-width: 260px; }
+
+.drawer-hint { font-size: 12.5px; margin: 4px 0 8px; }
+.drawer-manual { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.drawer-manual > summary { cursor: pointer; font-size: 13px; font-weight: 500; }
+.fork-search { display: grid; gap: 8px; margin: 4px 0 10px; }

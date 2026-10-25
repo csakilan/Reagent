@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { DRAFT_KEY, call, forkAgent, listAgents, resolvedAgent, teamBase, teamGrants, type AgentDetail, type AgentSummary, type Rejection, type TeamGrants } from "../lib/api";
+import { DRAFT_KEY, buildAgent, call, forkAgent, listAgents, resolvedAgent, teamBase, teamGrants, type AgentDetail, type AgentSummary, type Rejection, type TeamGrants } from "../lib/api";
 import { useLive } from "../lib/live";
 import { Failure, Rejections, Skeleton, Verdict, pct, usd } from "./ui";
 
@@ -33,8 +33,29 @@ function Suggestions({ team, term, chosen, onFork }: {
 }
 import { layerName, layerOf, type Leaf } from "../lib/resolved";
 
-/** The fork route also returns how the new draft resolves; AgentDetail does not list it. */
-type Created = AgentDetail & { rejections?: Rejection[] };
+/** The fork and build routes also return how the new draft resolves; AgentDetail does not list it. */
+type Created = AgentDetail & { rejections?: Rejection[]; by?: string; source?: string; reason?: string;
+  candidates?: { name: string; score: number; reason: string }[] };
+
+/** Search the team's agents to fork, ranked by outcome on the server. Never a list of every agent. */
+function ForkSearch({ team, chosen, onPick }: { team: string; chosen: string; onPick: (name: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [term, setTerm] = useState("");
+  useEffect(() => { const t = setTimeout(() => setTerm(query.trim()), 250); return () => clearTimeout(t); }, [query]);
+  const [state] = useLive<{ agents: Match[] }>(team ? `forksearch:${team}:${term}` : null, () => listAgents(term || undefined));
+  const hits = state.phase === "ready" ? state.data.agents.filter(a => a.team === team).slice(0, 8) : [];
+  return <div className="fork-search">
+    <input className="input" type="search" value={query} onChange={event => setQuery(event.target.value)}
+      placeholder={`Search ${team} agents by what they do`} aria-label="Search agents to fork" />
+    {state.phase === "loading" && <Skeleton rows={2} columns={1} label="Searching" />}
+    {state.phase === "ready" && (hits.length ? <ul className="suggest-list">{hits.map(a => <li key={a.name} className={chosen === a.name ? "selected" : undefined}>
+      <div className="suggest-head"><code>{a.name}</code><span className="muted">{a.version}</span>
+        <button className="button" type="button" onClick={() => onPick(a.name)} disabled={chosen === a.name}>{chosen === a.name ? "Selected" : "Fork this"}</button></div>
+      {a.desired_outcome && <p>{a.desired_outcome}</p>}
+      {a.match && <small className="muted">{a.match.reason}</small>}
+    </li>)}</ul> : <p className="muted">{term ? `No agent in ${team} matches “${term}”.` : `No agents in ${team} yet.`}</p>)}
+  </div>;
+}
 
 type Resolved = {
   effective: {
@@ -144,7 +165,7 @@ export default function NewAgentDrawer({ team, agents, initialFork, onClose, onC
   useEffect(() => { if (!targetTeam && fallbackTeam) setTargetTeam(fallbackTeam); }, [targetTeam, fallbackTeam]);
   // Keep the fork source inside the chosen team.
   useEffect(() => {
-    if (!forkable.some(a => a.name === forkFrom)) setForkFrom(forkable[0]?.name ?? "");
+    if (forkFrom && forkable.length && !forkable.some(a => a.name === forkFrom)) setForkFrom("");
   }, [targetTeam]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const close = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
@@ -154,6 +175,17 @@ export default function NewAgentDrawer({ team, agents, initialFork, onClose, onC
 
   const source = mode === "base" ? teamBase(targetTeam) : forkFrom;
   const valid = /^[a-z0-9-]+$/.test(name) && !!source;
+
+  const [building, setBuilding] = useState(false);
+  async function build() {
+    setBuilding(true); setProblem(null);
+    const outcome = await call<Created>(buildAgent(goal.trim(), team === null ? targetTeam : undefined));
+    setBuilding(false);
+    if (!outcome.ok) { setProblem({ detail: outcome.detail, rejections: outcome.rejections }); return; }
+    try { if (outcome.data.spec_yaml) window.sessionStorage.setItem(DRAFT_KEY(outcome.data.name), outcome.data.spec_yaml); } catch { /* the editor falls back to the API */ }
+    setCreated(outcome.data);
+    onCreated();
+  }
 
   async function create() {
     setBusy(true); setProblem(null);
@@ -175,8 +207,10 @@ export default function NewAgentDrawer({ team, agents, initialFork, onClose, onC
 
       {created ? <div className="drawer-body">
         <p><Verdict kind="pass">Draft created</Verdict></p>
-        <p><code>{created.name}</code> {created.version} is a draft in {created.team}.
-          {created.forked_from ? <> It records <code>forked_from: {created.forked_from}</code>.</> : <> It starts from the {created.team} base config.</>}</p>
+        <p><code>{created.name}</code> {created.version ?? "0.1.0"} is a draft in {created.team}.
+          {created.forked_from || created.source?.includes("@") ? <> It records <code>forked_from: {created.forked_from ?? created.source}</code>.</> : <> It starts from the {created.team} base config.</>}</p>
+        {created.reason && <p className="muted">agent-builder{created.by === "agent-builder" ? "" : " (direct)"}: {created.reason}</p>}
+        {created.candidates && created.candidates.length > 1 && <p className="muted">Also considered: {created.candidates.slice(1).map(c => c.name).join(", ")}</p>}
         {created.rejections && created.rejections.length > 0 && <Rejections items={created.rejections} title="Fix before publishing" />}
         <div className="drawer-actions">
           <Link className="button primary" href={`/agents/${created.name}/edit`}>Open in editor</Link>
@@ -187,12 +221,19 @@ export default function NewAgentDrawer({ team, agents, initialFork, onClose, onC
           <select className="select" value={targetTeam} onChange={event => setTargetTeam(event.target.value)}>
             {teams.map(t => <option key={t} value={t}>{t}</option>)}</select></label>}
 
-        <label className="field"><span>What should it achieve?</span>
-          <textarea className="input textarea" rows={2} value={goal} placeholder="Every PR touching Terraform gets flagged if it opens a bucket to the public"
+        <label className="field"><span>Describe the agent you want</span>
+          <textarea className="input textarea" rows={3} value={goal} placeholder="Every PR touching Terraform gets flagged if it opens a bucket to the public"
             onChange={event => setGoal(event.target.value)} /></label>
+        <div className="drawer-actions">
+          <button className="button primary" type="button" disabled={building || goal.trim().length < 8} onClick={build}>
+            {building ? "agent-builder is drafting…" : "Build it with agent-builder"}</button>
+        </div>
+        <p className="muted drawer-hint">agent-builder forks the closest agent in {targetTeam || "your team"} by outcome, or starts from the base config when nothing fits, then drafts the use case and task. You review it in the editor; nothing is published.</p>
         <Suggestions team={targetTeam} term={term} chosen={mode === "fork" ? forkFrom : null}
           onFork={agent => { setMode("fork"); setForkFrom(agent); }} />
 
+        <details className="drawer-manual" open={!!initialFork}>
+        <summary>Or choose the starting point yourself</summary>
         <fieldset className="drawer-choice">
           <legend>Start from</legend>
           <label className={mode === "base" ? "choice selected" : "choice"}>
@@ -201,24 +242,24 @@ export default function NewAgentDrawer({ team, agents, initialFork, onClose, onC
               <small>A blank agent that inherits the enterprise and team setup. No tools until you add them.</small></span>
           </label>
           <label className={mode === "fork" ? "choice selected" : "choice"}>
-            <input type="radio" name="start" checked={mode === "fork"} onChange={() => setMode("fork")} disabled={!forkable.length} />
+            <input type="radio" name="start" checked={mode === "fork"} onChange={() => setMode("fork")} />
             <span><strong>Fork an existing agent</strong>
-              <small>{forkable.length ? "Copies its tools, prompt and tests, and records where it came from." : "No agents in this team to fork yet."}</small>
-              {mode === "fork" && <select className="select" value={forkFrom} onChange={event => setForkFrom(event.target.value)}>
-                {forkable.map(a => <option key={a.name} value={a.name}>{a.name}@{a.version}</option>)}</select>}</span>
+              <small>Copies its tools, prompt and tests, and records where it came from.{forkFrom && mode === "fork" ? <> Forking <code>{forkFrom}</code>.</> : null}</small></span>
           </label>
         </fieldset>
+        {mode === "fork" && <ForkSearch team={targetTeam} chosen={forkFrom} onPick={setForkFrom} />}
 
         <label className="field"><span>Name</span>
-          <input className="input mono" value={name} placeholder="my-agent" autoFocus
+          <input className="input mono" value={name} placeholder="my-agent"
             onChange={event => setName(event.target.value.toLowerCase())} aria-invalid={!!name && !/^[a-z0-9-]+$/.test(name)} /></label>
         {name && !/^[a-z0-9-]+$/.test(name) && <p className="denied-text">Lowercase letters, digits and hyphens only.</p>}
         {problem && (problem.rejections.length ? <Rejections items={problem.rejections} title="Not created" /> : <p className="denied-text">{problem.detail}</p>)}
 
         <div className="drawer-actions">
-          <button className="button primary" type="submit" disabled={busy || !valid}>{busy ? "Creating…" : "Create draft"}</button>
+          <button className="button" type="submit" disabled={busy || !valid}>{busy ? "Creating…" : "Create draft"}</button>
           <button className="button" type="button" onClick={onClose}>Cancel</button>
         </div>
+        </details>
 
         {source && targetTeam && <Preview key={source} source={source} team={targetTeam} />}
       </form>}

@@ -82,7 +82,9 @@ def test_meta_agents_are_listed_without_configs_and_run_for_the_caller():
     listed = client.get("/v0/meta-agents", headers=BOB).json()["meta_agents"]
     assert {m["name"] for m in listed} == {"agent-builder", "cost-optimizer", "evaluator", "failure-triage", "security-reviewer"}
     assert all(set(m) == {"name", "description", "input"} for m in listed)       # no spec, prompt or tools
-    assert client.post("/v0/meta-agents/secret-scanner/runs", json={"input": {}}, headers=BOB).status_code == 404
+    # Team decision: meta-agents run inside the user flow, not on demand. Members are refused.
+    assert client.post("/v0/meta-agents/security-reviewer/runs", json={"input": {}}, headers=BOB).status_code == 403
+    assert client.post("/v0/meta-agents/secret-scanner/runs", json={"input": {}}, headers=FRANK).status_code == 404
 
 
 def test_platform_actions_are_filtered_by_the_caller():
@@ -127,3 +129,18 @@ def test_slack_events_verify_the_signature_and_route_mentions(monkeypatch):
     assert ran[0][1]["text"].endswith("how many PTO days?")
     raw, headers = _signed({**event, "event": {**event["event"], "channel": "#random"}})
     assert client.post("/v0/events/slack", content=raw, headers=headers).json()["agents"] == []
+
+
+def test_agent_builder_forks_the_closest_agent_or_the_team_base():
+    """Describing an agent in the New agent drawer triggers agent-builder."""
+    near = client.post("/v0/agents/build", json={"request": "Review pull requests to our infra repos and flag leaked secrets"},
+                       headers=BOB).json()
+    assert near["source"].startswith("pr-reviewer@") and near["team"] == "platform-eng" and near["rejections"] == []
+    far = client.post("/v0/agents/build", json={"request": "Summarize the week's deploys into a short status note"},
+                      headers=BOB).json()
+    assert far["source"] == "team:platform-eng"
+    built = client.get(f"/v0/agents/{far['name']}", headers=BOB).json()
+    assert "deploys" in built["description"] and built["status"] == "draft"
+    assert client.get(f"/v0/agents/{far['name']}", headers=DANA).status_code == 404     # another team
+    for n in (near["name"], far["name"]):
+        source._DRAFTS.pop(n, None)

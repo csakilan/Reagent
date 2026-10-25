@@ -24,7 +24,7 @@ from fastapi import APIRouter, BackgroundTasks, Body, FastAPI, Header, HTTPExcep
 from fastapi.responses import JSONResponse
 
 from contracts.errors import Code, ReAgentError, Rejection
-from runtime.resolver import load_catalog, resolve_agent
+from runtime.resolver import load_catalog, resolve_agent, resolve_document
 from runtime.resolver.source import Catalog, semver_key
 from runtime.resolver.validate import validate_draft_text
 
@@ -742,7 +742,11 @@ def post_meta_agent_run(name: str, body: dict[str, Any] = Body(...),
     the platform through the platform connector, filtered by the caller."""
     from runtime.engine import run_agent
     cat = load_catalog()
-    user, _, _ = _principal(cat, x_reagent_user)
+    user, is_admin, _ = _principal(cat, x_reagent_user)
+    # Team decision: meta-agents run when a user action needs them (describing a
+    # new agent, publishing, a failed run), not on demand. Admins keep this route.
+    if not is_admin:
+        raise HTTPException(403, "meta-agents run as part of the user flow, not on demand")
     doc = cat.latest(name)
     if doc is None or doc["metadata"].get("access") != "run_only":
         raise HTTPException(404, "not found")
@@ -843,6 +847,92 @@ async def post_slack_events(request: Request, background: BackgroundTasks):
     for name in targets:
         background.add_task(_run_from_slack, name, payload)
     return {"ok": True, "channel": channel, "agents": targets}
+
+
+#: Outcome-search score above which forking the closest agent beats a blank base config.
+FORK_SCORE = 2.5
+
+
+def _slug(text: str, taken: set[str]) -> str:
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    stop = {"a", "an", "the", "and", "or", "that", "to", "for", "of", "in", "on", "our", "my", "with", "agent", "which", "it", "them"}
+    base = "-".join([w for w in words if w not in stop][:3]) or "new-agent"
+    name, n = base, 2
+    while name in taken:
+        name, n = f"{base}-{n}", n + 1
+    return name
+
+
+@router.post("/agents/build", status_code=201, tags=["agents"])
+def post_build_agent(body: dict[str, Any] = Body(...), x_reagent_user: str | None = Header(default=None)):
+    """agent-builder, triggered by describing an agent in the New agent drawer (SPEC.md §10).
+
+    It drafts a new agent for the caller's team from a plain-English request: it
+    forks the closest existing agent by outcome when one fits, otherwise the
+    team's base config. With REAGENT_MODEL=live the real agent-builder meta-agent
+    runs through the platform connector; without it, or if it proposes nothing,
+    the same decision is made directly. The draft is never published.
+    Not in contracts/openapi.yaml yet (reported)."""
+    cat = load_catalog()
+    user, is_admin, team = _principal(cat, x_reagent_user)
+    request = str((body or {}).get("request") or "").strip()
+    if len(request) < 8:
+        raise HTTPException(422, "describe the agent in a sentence or two")
+    target = team or (body or {}).get("team")
+    if not target or cat.team(target) is None:
+        raise HTTPException(422, "agents are built for a team")
+
+    hits = get_agents(q=request, limit=3, x_reagent_user=user)["agents"]
+    hits = [h for h in hits if h.get("team") == target]
+    candidates = [{"name": h["name"], "score": round(h["match"]["score"], 2), "reason": h["match"]["reason"]}
+                  for h in hits if h.get("match")]
+
+    by = "platform"
+    if os.environ.get("REAGENT_MODEL", "fake").lower() == "live":
+        before = set(cat.agents)
+        try:
+            from runtime.engine import run_agent
+            run_agent("agent-builder", {"request": request}, user=user, trigger="http")
+        except Exception:  # noqa: BLE001 - fall back to the direct decision below
+            pass
+        fresh = sorted(set(load_catalog().agents) - before)
+        if fresh:
+            made = load_catalog().latest(fresh[0])
+            resolved = resolve_document(made, catalog=load_catalog(), caller=None)
+            return {"name": fresh[0], "by": "agent-builder", "source": made["metadata"].get("forked_from") or f"team:{target}",
+                    "candidates": candidates, "spec_yaml": yaml.safe_dump(made, sort_keys=False),
+                    "rejections": resolved["rejections"], "team": target}
+
+    name = (body or {}).get("name") or _slug(request, set(cat.agents))
+    if not NAME.match(name) or cat.agent_versions(name):
+        raise HTTPException(409, f"an agent called {name} already exists")
+    best = candidates[0] if candidates and candidates[0]["score"] >= FORK_SCORE else None
+    if best:
+        src = cat.latest(best["name"])
+        doc = copy.deepcopy(src)
+        doc["metadata"].update(name=name, version="0.1.0", team=target,
+                               forked_from=f"{best['name']}@{src['metadata']['version']}")
+        task = (doc["spec"].get("prompt") or {}).get("task", "").rstrip()
+        doc["spec"]["prompt"] = {"task": f"{task}\n\nAdapted for this request: {request}"}
+        reason = f"Forked {best['name']}: {best['reason']}"
+    else:
+        doc = team_base(cat, target, user, name)
+        doc["spec"]["prompt"] = {"task": f"{request}\n\nWork step by step and say what you did."}
+        reason = ("No existing agent is close enough, so it starts from the team's base config."
+                  if candidates else "No similar agent in the team, so it starts from the team's base config.")
+    doc["spec"]["use_case"] = {"description": request[:300], "desired_outcome": request[:300]}
+    doc["spec"].setdefault("ownership", {})["owners"] = [user]
+    resolved = resolve_document(doc, catalog=cat, caller=None)
+    if _layers_db():
+        from runtime.publish.pgstore import PgStore
+        src_ref = doc["metadata"].get("forked_from")
+        PgStore().create_draft(doc, forked_from=tuple(src_ref.split("@")) if src_ref else None)
+    else:
+        from runtime.resolver.source import register_draft
+        register_draft(doc)
+    return {"name": name, "by": by, "source": doc["metadata"].get("forked_from") or f"team:{target}",
+            "reason": reason, "candidates": candidates, "team": target,
+            "spec_yaml": yaml.safe_dump(doc, sort_keys=False), "rejections": resolved["rejections"]}
 
 
 def create_app() -> FastAPI:

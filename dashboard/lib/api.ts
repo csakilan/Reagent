@@ -138,3 +138,6 @@ export const registerItem = (kind: "connector" | "model", spec: string) => untyp
 export type MetaAgent = { name: string; description: string; input: Record<string, unknown> };
 export const metaAgents = () => untyped("GET", "/v0/meta-agents");
 export const runMetaAgent = (name: string, input: Record<string, unknown>) => untyped("POST", `/v0/meta-agents/${encodeURIComponent(name)}/runs`, { input });
+
+/** agent-builder: draft an agent from a plain-English request (fork the closest, or the base). */
+export const buildAgent = (request: string, team?: string) => untyped("POST", "/v0/agents/build", team ? { request, team } : { request });
