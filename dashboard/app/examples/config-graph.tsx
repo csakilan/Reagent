@@ -9,7 +9,7 @@ type Team = Setup["teams"][number];
 type Agent = Team["agents"][number];
 type Selection = { kind: "enterprise" } | { kind: "team"; team: Team } | { kind: "agent"; team: Team; agent: Agent };
 type Point = { x: number; y: number };
-const WIDTH = Math.max(1200, (exampleSetup.teams.length + 1) * 400);
+const WIDTH = Math.max(900, (exampleSetup.teams.length + 1) * 300);
 const HEIGHT = 570 + Math.max(1, ...exampleSetup.teams.map(team => team.agents.length)) * 134 + 80;
 const enterprisePoint = { x: 600, y: 115 };
 const teamPoint = (_team: Team, index: number, count: number): Point => ({ x: WIDTH * (index + 1) / (count + 1), y: 330 });
