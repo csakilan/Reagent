@@ -122,6 +122,15 @@ def register_draft(doc: dict[str, Any]) -> None:
     _DRAFTS[doc["metadata"]["name"]] = doc
 
 
+#: Layer edits made by enterprise admins in this process when there is no database
+#: (runtime/resolver/layers.py). Keyed by kind, then name; applied on every load.
+_LAYERS: dict[str, dict[str, dict[str, Any]]] = {"Enterprise": {}, "Team": {}, "Connector": {}, "Model": {}}
+
+
+def overlay(doc: dict[str, Any]) -> None:
+    _LAYERS[doc["kind"]][doc["metadata"]["name"]] = doc
+
+
 def load_catalog(root: str | os.PathLike | None = None) -> Catalog:
     """The layers, re-read on every call. REAGENT_LAYERS=db reads the database
     (SPEC.md §1); anything else, or an explicit `root`, reads a spec directory."""
@@ -183,4 +192,9 @@ def load_catalog_files(root: str | os.PathLike | None = None) -> Catalog:
     for d in _DRAFTS.values():
         if d["metadata"]["name"] not in cat.agents:
             cat.add_agent(d)
+    for d in _LAYERS["Enterprise"].values():
+        cat.enterprise = d
+    cat.teams.update(_LAYERS["Team"])
+    cat.connectors.update(_LAYERS["Connector"])
+    cat.models.update(_LAYERS["Model"])
     return cat

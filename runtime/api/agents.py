@@ -554,6 +554,156 @@ def post_fork(name: str, body: dict[str, Any] = Body(...),
             "rejections": resolved["rejections"]}
 
 
+# -- connector requests and admin layer edits (SPEC.md §2, MVP rows 8 and 9) ----
+#: Connector requests without a database. In database mode they are rows in
+#: connector_requests (contracts/db/001_init.sql).
+_REQUESTS: list[dict[str, Any]] = []
+
+
+def _layers_db() -> bool:
+    return os.environ.get("REAGENT_LAYERS", "files").lower() == "db"
+
+
+def _admin_only(cat: Catalog, user: str | None) -> str:
+    who, is_admin, _ = _principal(cat, user)
+    if not is_admin:
+        raise HTTPException(403, "enterprise admins only")
+    return who
+
+
+def _yaml_doc(body: dict[str, Any] | None) -> Any:
+    text = (body or {}).get("spec")
+    if not isinstance(text, str):
+        raise HTTPException(422, "body.spec must be the raw YAML document")
+    try:
+        return yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise HTTPException(422, f"the YAML does not parse: {e.__class__.__name__}")
+
+
+def _layer_response(report: dict[str, Any]) -> JSONResponse:
+    return JSONResponse(status_code=200 if not report["rejections"] else 422, content=report)
+
+
+@router.post("/connector-requests", status_code=201, tags=["admin"])
+def post_connector_request(body: dict[str, Any] = Body(...), x_reagent_user: str | None = Header(default=None)):
+    """A team member asks enterprise admins for a connector or action their team lacks."""
+    cat = load_catalog()
+    user, is_admin, team = _principal(cat, x_reagent_user)
+    text = str((body or {}).get("description") or "").strip()
+    if not text:
+        raise HTTPException(422, "description is required")
+    target = (body or {}).get("team") if is_admin else team
+    if not target or cat.team(target) is None:
+        raise HTTPException(422, "requests are made for a team")
+    req = {"description": text[:2000], "team": target, "requested_by": user, "status": "open",
+           "connector": (body or {}).get("connector")}
+    if _layers_db():
+        import psycopg
+        with psycopg.connect(os.environ.get("DATABASE_URL") or "", connect_timeout=15) as c:
+            tid = c.execute("SELECT id FROM teams WHERE name = %s", (target,)).fetchone()[0]
+            uid = c.execute("SELECT id FROM users WHERE name = %s", (user,)).fetchone()[0]
+            row = c.execute("INSERT INTO connector_requests (team_id, requested_by, description) "
+                            "VALUES (%s, %s, %s) RETURNING id, created_at", (tid, uid, req["description"])).fetchone()
+        req.update(id=row[0], created_at=row[1].isoformat())
+    else:
+        from runtime.publish.store import now
+        req.update(id=len(_REQUESTS) + 1, created_at=now())
+        _REQUESTS.append(req)
+    return req
+
+
+def _all_requests() -> list[dict[str, Any]]:
+    if not _layers_db():
+        return list(_REQUESTS)
+    import psycopg
+    with psycopg.connect(os.environ.get("DATABASE_URL") or "", connect_timeout=15) as c:
+        rows = c.execute("SELECT r.id, t.name, u.name, r.description, r.status, r.created_at FROM connector_requests r "
+                         "JOIN teams t ON t.id = r.team_id JOIN users u ON u.id = r.requested_by ORDER BY r.id").fetchall()
+    return [{"id": i, "team": t, "requested_by": u, "description": d, "status": s, "created_at": c_.isoformat()}
+            for i, t, u, d, s, c_ in rows]
+
+
+@router.get("/connector-requests", tags=["admin"])
+def get_connector_requests(x_reagent_user: str | None = Header(default=None)):
+    """Admins see every request; members see their own team's."""
+    cat = load_catalog()
+    _, is_admin, team = _principal(cat, x_reagent_user)
+    return {"requests": [r for r in _all_requests() if is_admin or r["team"] == team]}
+
+
+@router.post("/connector-requests/{request_id}/decide", tags=["admin"])
+def post_decide_request(request_id: int, body: dict[str, Any] = Body(...),
+                        x_reagent_user: str | None = Header(default=None)):
+    """An admin closes a request: fulfilled (after granting it in the team layer) or rejected.
+    Not in contracts/openapi.yaml yet (reported)."""
+    cat = load_catalog()
+    _admin_only(cat, x_reagent_user)
+    status = (body or {}).get("status")
+    if status not in ("fulfilled", "rejected"):
+        raise HTTPException(422, "status must be fulfilled or rejected")
+    if _layers_db():
+        import psycopg
+        with psycopg.connect(os.environ.get("DATABASE_URL") or "", connect_timeout=15) as c:
+            if c.execute("UPDATE connector_requests SET status = %s WHERE id = %s RETURNING id",
+                         (status, request_id)).fetchone() is None:
+                raise HTTPException(404, "not found")
+    else:
+        req = next((r for r in _REQUESTS if r["id"] == request_id), None)
+        if req is None:
+            raise HTTPException(404, "not found")
+        req["status"] = status
+    return {"id": request_id, "status": status}
+
+
+@router.post("/admin/teams/{team_id}", tags=["admin"])
+def post_admin_team(team_id: str, body: dict[str, Any] = Body(...), x_reagent_user: str | None = Header(default=None)):
+    """Edit a team layer: grants, models, limits, guardrails, members. Reports which of
+    the team's agents start or stop resolving. `team_id` is the team's name."""
+    from runtime.resolver.layers import apply
+    cat = load_catalog()
+    _admin_only(cat, x_reagent_user)
+    doc = _yaml_doc(body)
+    if not isinstance(doc, dict) or (doc.get("metadata") or {}).get("name") != team_id:
+        raise HTTPException(422, f"the document must be the Team layer named {team_id}")
+    return _layer_response(apply(doc, dry_run=bool((body or {}).get("dry_run"))))
+
+
+@router.post("/admin/enterprise", tags=["admin"])
+def post_admin_enterprise(body: dict[str, Any] = Body(...), x_reagent_user: str | None = Header(default=None)):
+    from runtime.resolver.layers import apply
+    cat = load_catalog()
+    _admin_only(cat, x_reagent_user)
+    return _layer_response(apply(_yaml_doc(body), dry_run=bool((body or {}).get("dry_run"))))
+
+
+@router.post("/admin/registry", status_code=201, tags=["admin"])
+def post_admin_registry(body: dict[str, Any] = Body(...), x_reagent_user: str | None = Header(default=None)):
+    """Register a connector or model. A new connector's actions also need wire names in
+    contracts/connector_actions.json (generated) before agents can call them."""
+    from runtime.resolver.layers import apply
+    cat = load_catalog()
+    _admin_only(cat, x_reagent_user)
+    kind = (body or {}).get("kind")
+    if kind not in ("connector", "model"):
+        raise HTTPException(422, "kind must be connector or model")
+    doc = _yaml_doc(body)
+    if not isinstance(doc, dict) or doc.get("kind") != kind.capitalize():
+        raise HTTPException(422, f"the document must be kind: {kind.capitalize()}")
+    report = apply(doc)
+    return JSONResponse(status_code=201 if report["saved"] else 422, content=report)
+
+
+@router.get("/admin/layers", tags=["admin"])
+def get_admin_layers(x_reagent_user: str | None = Header(default=None)):
+    """The editable layer documents as YAML, for the admin screens. Admins only."""
+    cat = load_catalog()
+    _admin_only(cat, x_reagent_user)
+    dump = lambda d: yaml.safe_dump(d, sort_keys=False)
+    return {"enterprise": dump(cat.enterprise), "teams": {n: dump(d) for n, d in sorted(cat.teams.items())},
+            "connectors": sorted(cat.connectors), "models": sorted(cat.models)}
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="ReAgent agents (wf/resolver)")
     app.include_router(router)
