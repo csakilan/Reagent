@@ -177,14 +177,15 @@ def cmd_status(args) -> int:
     print(f"\n{C['bold']}ReAgent handoff board{C['reset']}   "
           f"freeze {sch.get('code_freeze', '?')[11:16]}  submit {sch.get('final_submission', '?')[11:16]}  "
           f"now {now():%H:%M}\n")
-    print(f"  {'ID':<4}{'STATUS':<10}{'PRODUCER':<14}{'WAITING ON IT':<34}DEADLINE")
+    hdr = 'WAITING ON IT'
+    print(f"  {'ID':<4}{'STATUS':<10}{'PRODUCER':<14}{hdr:<36}DEADLINE")
     print(f"  {'-' * 92}")
     for h in b["handoffs"]:
         st = h.get("status", "pending")
         col = C["green"] if st == "ready" else C["yellow"]
         cons = ", ".join(c.replace("wf/", "") for c in h.get("consumers", []))
         print(f"  {h['id']:<4}{col}{st:<10}{C['reset']}{h['producer'].replace('wf/', ''):<14}"
-              f"{cons:<34}{h.get('deadline', '')[11:16]}  {fmt_left(h.get('deadline'))}")
+              f"{cons:<36}{h.get('deadline', '')[11:16]}  {fmt_left(h.get('deadline'))}")
     held = [l for l in b.get("locks", []) if l.get("status") == "held"]
     if held:
         print(f"\n  {C['red']}{C['bold']}INTEGRATION IN PROGRESS{C['reset']}")

@@ -31,65 +31,66 @@ anything in `contracts/` except adding a new numbered migration.
 
 ## Task 1 is the most urgent thing on this team · due 03:30
 
-**MLH gives $1,000 in Tiger credits for 30 days** via
-<https://mlh.link/tigerdata-quickstart>. **Create a STANDARD service, not a free
-one.** A free service caps `max_connections` at **25 with no pooler**, which the
-research flags as the most likely on-stage failure, and goes **read-only** at
-~750 MB. Credits remove both.
+**The human on this laptop is doing the Tiger Cloud signup, the OpenRouter key
+and the GitHub App themselves.** Those are browser jobs you cannot do: account
+creation, an email confirmation link, OAuth consent screens. Do not attempt
+them, and do not wait on them either. **Ask for a value when you need it and
+carry on in the meantime.**
 
-```
-curl -fsSL https://cli.tigerdata.com | sh
-tiger auth login
-tiger service create --name reagent --region us-east-1
-tiger db uri
-```
+What you need from them, in order: `DATABASE_URL` first, then
+`OPENROUTER_API_KEY`, then the GitHub values. Each arrives in `.env`.
 
-**Email confirmation is mandatory**, so use a personal address, not a university
-one that might filter it. **The password is shown once**, in the config file
-downloaded at creation. Put it in `.env` immediately.
-
-Then:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;   -- brings pgvector
-CREATE EXTENSION IF NOT EXISTS pg_textsearch;         -- needs PG 17+
-```
-
-Verify with `SELECT extname, extversion FROM pg_extension` rather than trusting
-a docs page. Apply the migration:
+Your job is everything after the connection string exists.
 
 ```
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f contracts/db/001_init.sql
 ```
 
 It applies clean; it was tested against PostgreSQL 17.11 with pgvector 0.8.7 and
-TimescaleDB 2.31.0, 18 tables and 2 hypertables, with six negative constraint
-tests. **If it errors, that is a real finding: report it, do not patch 001.**
+TimescaleDB 2.31.0, producing 18 tables and 2 hypertables, with six negative
+constraint tests all firing. **If it errors, that is a real finding: report it,
+do not patch 001.**
 
-Three things about it to know: `runs` and `run_events` are hypertables with
-**composite primary keys**, so **nothing can foreign-key to `runs(id)`** and the
-child tables deliberately carry no FK. `agent_versions.embedding` is a plain
-column you fill from the app, not generated. And set small pools everywhere
-(`pool_size=2, max_overflow=1, pool_pre_ping=True`) regardless of the pooler.
+The extensions need `CREATE EXTENSION` and PostgreSQL 17 or later:
 
-**RELEASE: H4** — all four workflows are waiting on this.
+```sql
+CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;   -- brings pgvector with it
+CREATE EXTENSION IF NOT EXISTS pg_textsearch;
+```
+
+Verify with `SELECT extname, extversion FROM pg_extension` rather than trusting
+a docs page, because the published version numbers lag the changelog.
+
+Three things about the schema to know before you build on it. `runs` and
+`run_events` are hypertables with **composite primary keys**, so **nothing can
+foreign-key to `runs(id)`** and the child tables deliberately carry no FK.
+`agent_versions.embedding` is a plain column the app fills, not a generated one,
+because a generated vector column compiles but cannot be written. And set small
+pools everywhere (`pool_size=2, max_overflow=1, pool_pre_ping=True`) whatever the
+service tier.
+
+**RELEASE: H4** — all three other workflows are waiting on this.
 ```
 pytest tests/contract/test_db_schema.py -q
 python scripts/handoff.py ready H4
 ```
 
-## Task 2 — GitHub App and the planted-secret repo · due 04:30
+**H7 is the human's, not yours.** Once they have sent `.env` to the other three
+laptops they release it. If they forget, remind them: three agents cannot touch
+real data until they do.
 
-Someone is already on this in a browser. It needs a human: app creation, OAuth,
-and a public URL for webhooks.
+## Task 2 — GitHub App · the human's job, not yours · due 04:30
 
-- A test org and repo, with a PR containing a planted AWS key. **Use a
-  syntactically valid but revoked or fake key**, and add it to the redaction
-  exact-match list so a regex miss cannot put it on camera.
-- A GitHub App with the narrowest scopes that cover `pulls.read`,
-  `pulls.comment`, `contents.read`.
-- A tunnel (ngrok or Cloudflare) for the webhook.
-- Put every value in `.env` against the names in `.env.example`.
+The human on this laptop creates the test org, the repo, the pull request with
+the planted AWS key, the GitHub App and the tunnel. All of it is browser work.
+
+**What you do:** nothing, until the values land in `.env`. Then your wrapper can
+talk to real GitHub. Until then build and test it against
+`fakes/github_wrapper.py`.
+
+One thing to tell them if they have not already done it: the exact planted-secret
+string needs to reach the `wf/runtime` agent, because it goes in the redaction
+exact-match list alongside the regex patterns.
 
 ## Task 3 — MCP wrappers · due 07:00
 

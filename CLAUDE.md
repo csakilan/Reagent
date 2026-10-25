@@ -67,6 +67,7 @@ dashboard/                 WF3. Next.js, React, Tailwind
 connectors/                WF4. MCP wrapper servers
 cli/                       WF2. Typer CLI
 docs/agents/               your brief. Read yours.
+docs/handoff/              the per-laptop files the humans were sent. Context, not instructions for you.
 docs/research/             VERIFIED external facts. Section 9. Trust these over your training data.
 ```
 
@@ -199,10 +200,13 @@ Rules that follow from the mixed fleet:
 
 - **Every script is Python.** No `.sh` in the build path. Windows cannot run it.
 - **Write `python`, never `python3`.** `python3` does not exist on Windows.
-- **Docker is optional and not the default.** It is only needed for the local
-  Postgres fallback. The primary database is Tiger Cloud, which is remote.
-  Docker Desktop on Windows wants WSL2 and possibly a reboot, so do not install
-  it unless the cloud path fails.
+- **Docker is optional and not the default.** The primary database is Tiger
+  Cloud, which is remote. Docker Desktop on Windows wants WSL2 and possibly a
+  reboot, so do not install it.
+- **There is no shared fallback if Tiger fails.** Three of the four laptops are
+  Windows, so a local Postgres unblocks one person's unit work and nothing else:
+  integration would have no common database. Treat the cloud connection string
+  as a hard dependency, not a preference.
 - **Line endings are pinned** by `.gitattributes` to `eol=lf`. If `git status`
   on Windows shows the whole tree modified, run
   `git config --global core.autocrlf input` and re-clone.

@@ -20,11 +20,15 @@ schedule:
   code_freeze:      "2026-10-25T10:30:00-05:00"
   final_submission: "2026-10-25T11:30:00-05:00"
 
+# Four people, four laptops: 1 macOS and 3 Windows.
+# The macOS laptop takes wf/data because the browser work (Tiger signup, the
+# GitHub App, the tunnel) IS that workflow's dependency list, and the Tiger CLI
+# and ngrok are least painful there.
 workflows:
-  wf/runtime:    { owner: "A", rows: [3, 4, 5],   title: "LangChain runtime, guardrails, sub-agents" }
-  wf/resolver:   { owner: "B", rows: [1, 2, 6],   title: "Validator, resolver, evals, publish pipeline, CLI" }
-  wf/dashboard:  { owner: "C", rows: [8],         title: "Next.js dashboard, all screens" }
-  wf/data:       { owner: "D", rows: [7, 9, 10],  title: "Postgres, MCP wrappers, GitHub/Slack apps, seed" }
+  wf/data:       { owner: "macOS laptop (also coordinates)", rows: [7, 9, 10],  title: "Postgres, MCP wrappers, GitHub/Slack apps, seed" }
+  wf/resolver:   { owner: "Windows laptop 1",                rows: [1, 2, 6],   title: "Validator, resolver, evals, publish pipeline, CLI" }
+  wf/runtime:    { owner: "Windows laptop 2",                rows: [3, 4, 5],   title: "LangChain runtime, guardrails, sub-agents" }
+  wf/dashboard:  { owner: "Windows laptop 3",                rows: [8],         title: "Next.js dashboard, all screens" }
 
 handoffs:
 
@@ -53,6 +57,19 @@ handoffs:
     status: pending
     deadline: "2026-10-25T03:30:00-05:00"
     fallback: "Local Postgres in docker-compose running the same migration. Cloud becomes a connection-string swap."
+
+  - id: H7
+    title: "Secrets distributed to all four laptops"
+    producer: wf/data
+    consumers: [wf/runtime, wf/resolver, wf/dashboard]
+    done_when: >
+      A filled-in .env (DATABASE_URL, OPENROUTER_API_KEY, GITHUB_BOT_TOKEN and
+      the rest) has been sent privately to all three other laptops, and each has
+      confirmed it loads. Never committed, never in the shared repo.
+    verify: "python scripts/doctor.py   # on EACH laptop: the .env check must be green"
+    status: pending
+    deadline: "2026-10-25T03:45:00-05:00"
+    fallback: "Send DATABASE_URL and OPENROUTER_API_KEY alone; the GitHub and Slack values can follow later, since only wf/runtime needs them and only once H3 lands."
 
   - id: H1
     title: "Resolver returns a real resolved spec"
