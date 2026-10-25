@@ -170,7 +170,7 @@ async def _build(spec: dict[str, Any], recorder: Recorder, ctx: RunCtx, checkpoi
     if gated:
         middleware.append(HumanInTheLoopMiddleware(interrupt_on=gated, interrupt_mode="per_call",
                                                    description_prefix="Approval required"))
-    middleware.append(ToolExecutionMiddleware(grants, recorder, recorder.redactor))
+    middleware.append(ToolExecutionMiddleware(grants, recorder, recorder.redactor, ctx.deadline))
 
     agent = create_agent(model, tools=tools, system_prompt=prompt, middleware=middleware,
                          checkpointer=checkpointer, name=spec.get("agent"))

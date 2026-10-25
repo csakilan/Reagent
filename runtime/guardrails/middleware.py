@@ -14,6 +14,7 @@ counts as executed (allowed: true) once it has actually run.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any, Awaitable, Callable, NotRequired
@@ -94,11 +95,15 @@ class ToolExecutionMiddleware(AgentMiddleware):
     needed, approved. Redacts the result BEFORE the model sees it (path 2 of
     4) and records the executed call."""
 
-    def __init__(self, grants: GrantSet, recorder: Any, redactor: Redactor) -> None:
+    def __init__(self, grants: GrantSet, recorder: Any, redactor: Redactor,
+                 deadline: float | None = None) -> None:
         super().__init__()
         self.grants = grants
         self.recorder = recorder
         self.redactor = redactor
+        # time.monotonic() deadline. RunControl drains only at a step boundary,
+        # so a hung MCP call would sail past it; this bounds the call itself.
+        self.deadline = deadline
 
     def _finish(self, request: ToolCallRequest, result: Any, started: float,
                 error: str | None = None) -> Any:
@@ -128,7 +133,17 @@ class ToolExecutionMiddleware(AgentMiddleware):
 
     async def awrap_tool_call(self, request, handler):
         t = time.monotonic()
-        return self._finish(request, await handler(request), t)
+        if self.deadline is None:
+            return self._finish(request, await handler(request), t)
+        try:
+            res = await asyncio.wait_for(handler(request), timeout=max(0.0, self.deadline - t))
+        except (asyncio.TimeoutError, TimeoutError):
+            call = request.tool_call
+            res = ToolMessage(content=f"{Code.TIMEOUT.value}: the tool call ran past the run's "
+                                      "timeout and was abandoned.",
+                              name=call["name"], tool_call_id=call["id"], status="error")
+            return self._finish(request, res, t, error=Code.TIMEOUT.value)
+        return self._finish(request, res, t)
 
 
 class ModelGuardMiddleware(AgentMiddleware):
