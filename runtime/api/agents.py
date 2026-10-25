@@ -76,6 +76,31 @@ def post_validate(name: str, body: dict[str, Any] = Body(...),
     return validate_draft_text(text, cat)
 
 
+@router.post("/{name}/evals")
+def post_evals(name: str, body: dict[str, Any] | None = Body(default=None),
+               x_reagent_user: str | None = Header(default=None)):
+    """Runs the suite in the mocked sandbox. The model follows REAGENT_MODEL
+    (fake by default), so a dashboard click never spends credits by accident."""
+    from runtime.evals import run_evals
+
+    cat = load_catalog()
+    user, is_admin, team = _principal(cat, x_reagent_user)
+    doc = cat.latest(name)
+    if doc is None or not _visible(doc, is_admin, team):
+        raise HTTPException(404, "not found")
+    body = body or {}
+    runs = body.get("runs_per_case", 5)
+    if not isinstance(runs, int) or runs < 1:
+        raise HTTPException(422, "runs_per_case must be an integer >= 1")
+    report = run_evals(name, runs_per_case=runs, caller=user, catalog=cat,
+                       mutants=bool(body.get("mutants")))
+    if not is_admin:
+        for c in report["cases"]:      # SPEC.md §11: members see inherited cases' names and results only
+            if c["origin"] == "inherited":
+                c["checks"] = {}
+    return report
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="ReAgent agents (wf/resolver)")
     app.include_router(router)

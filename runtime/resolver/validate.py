@@ -101,9 +101,12 @@ def case_issues(cat: Catalog, doc: dict[str, Any], resolved: dict[str, Any]) -> 
                 out.append(issue(Code.UNKNOWN_ACTION, base, attempted=perm,
                                  message=f"{base} names {perm}, which is not a registered "
                                          f"action or a declared sub-agent."))
-        for s in subs:                                                   # FROZEN D4
-            if f"agent:{s}" not in mocks:
-                out.append(issue(Code.UNMOCKED_ACTION, f"{base}.mocks", attempted=f"agent:{s}"))
+        reached = [f"agent:{s}" for s in subs]                           # FROZEN D4
+        reached += list(c["expect"].get("tool_calls", []))
+        reached += [s.get("action", "") for s in c["expect"].get("side_effects", [])]
+        for perm in dict.fromkeys(reached):
+            if perm not in mocks:
+                out.append(issue(Code.UNMOCKED_ACTION, f"{base}.mocks", attempted=perm))
         if c["expect"].get("side_effects") and not mocks:
             out.append(issue(Code.UNMOCKED_ACTION, f"{base}.mocks",
                              message=f"{base} checks side_effects but has no mocked sandbox."))
