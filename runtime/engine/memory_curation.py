@@ -68,7 +68,7 @@ INJECTION = re.compile(
 #: configures an S3 bucket..." facts, which belong in the episode instead.
 RUN_SPECIFIC = re.compile(
     r"(?i)\b(this|that) (pull request|pr|run|diff|change|changeset|commit|review)s?\b"
-    r"|\bthe (pull request|pr|run|changeset|commit)\b"
+    r"|\bthe (pull request|pr|run|changeset|commit)\b(?!-)"
     r"|\bin the (changes|diff)\b|\b(was|were) (executed|run|called|reported)\b"
     r"|\b(the )?(pr|run)\s*#?\d+\b")
 

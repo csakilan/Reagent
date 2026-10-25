@@ -50,6 +50,7 @@ def build_model(model: dict[str, Any], *, fallback: bool = False, has_tools: boo
     if model_mode() != "live":
         from runtime.engine.fakes import FakeChatModel
         return FakeChatModel(model_name=f"fake/{or_id}")
+    import httpx
     from langchain_openai import ChatOpenAI
     params = dict(model.get("params") or {})
     temperature = None if _rejects_temperature(or_id) else params.get("temperature")
@@ -69,6 +70,11 @@ def build_model(model: dict[str, Any], *, fallback: bool = False, has_tools: boo
                     if has_tools and os.environ.get("REAGENT_REQUIRE_PARAMETERS") == "1" else None),
         max_retries=1,
         timeout=120,
+        # A client of its own. langchain-openai otherwise shares one cached async
+        # client process-wide, and a pooled connection opened in an earlier event
+        # loop (run_agent, then decide_approval in a new asyncio.run) fails with
+        # "Event loop is closed" on the next call. Found live in memory curation.
+        http_async_client=httpx.AsyncClient(timeout=120),
     )
 
 
