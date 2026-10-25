@@ -54,10 +54,17 @@ def _visible(doc: dict[str, Any], is_admin: bool, team: str | None) -> bool:
 def get_resolved(name: str, x_reagent_user: str | None = Header(default=None)):
     cat = load_catalog()                       # SPEC.md §1: re-read every layer, every time
     user, is_admin, team = _principal(cat, x_reagent_user)
-    doc = cat.latest(name)
-    if doc is None or not _visible(doc, is_admin, team):
-        raise HTTPException(404, "not found")  # deliberately indistinguishable
-    out = resolve_agent(name, caller=user, catalog=cat)
+    if name.startswith("team:"):               # the team's base config, previewed unsaved
+        base = name[len("team:"):]
+        if cat.team(base) is None or not (is_admin or base == team):
+            raise HTTPException(404, "not found")
+        draft = team_base(cat, base, user, "new-agent")
+        out = resolve_agent("new-agent", caller=user, catalog=cat, draft=draft)
+    else:
+        doc = cat.latest(name)
+        if doc is None or not _visible(doc, is_admin, team):
+            raise HTTPException(404, "not found")  # deliberately indistinguishable
+        out = resolve_agent(name, caller=user, catalog=cat)
     if out["rejections"]:
         return JSONResponse(status_code=422, content={"rejections": out["rejections"]})
     return out
@@ -249,6 +256,34 @@ def post_calibration(body: dict[str, Any] = Body(...),
 
 
 NAME = re.compile(r"^[a-z0-9-]+$")
+
+
+@router.get("/teams/{team_name}/grants", tags=["agents"])
+def get_team_grants(team_name: str, x_reagent_user: str | None = Header(default=None)):
+    """What a team's agents may pick from: granted connector actions with their
+    resource scope, and allowed models. SPEC.md §2 lets members see exactly this
+    for their own team. Not in contracts/openapi.yaml yet (the New agent preview)."""
+    from contracts.errors import Code as _Code
+    from runtime.resolver.merge import Resolution, Scope
+
+    cat = load_catalog()
+    _, is_admin, team = _principal(cat, x_reagent_user)
+    if cat.team(team_name) is None or not (is_admin or team_name == team):
+        raise HTTPException(404, "not found")
+    probe = {"metadata": {"name": "grants-probe", "version": "0.0.0", "level": "team",
+                          "team": team_name}, "spec": {}}
+    res = Resolution(cat, probe, caller=None, root_team=None, overrides=None, trigger=None)
+    res.collect_deny()
+    scope = res.team_scope(res.enterprise_scope(), team_name, f"team:{team_name}", silent=True)
+    connectors = []
+    for name, g in sorted(scope.grants.items()):
+        actions = sorted(a for a in g["actions"] if not res.denied(name, a))
+        risks = {a: cat.actions(name)[a]["risk"] for a in actions}
+        connectors.append({"connector": name, "actions": actions, "risk": risks,
+                           "resources": g["resources"]})
+    models = sorted(res._allow_chain("models", sorted(cat.models), _Code.UNKNOWN_MODEL)[-1][0])
+    return {"team": team_name, "connectors": connectors, "models": models,
+            "denylist": sorted({p for p, _ in res.deny})}
 
 
 @router.post("/publish-runs/{run_id}/abandon")

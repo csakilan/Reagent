@@ -5,7 +5,7 @@ import { PageHead } from "../ui";
 export default function HierarchyPage() {
   return <>
     <PageHead crumb="Policy / Hierarchy" title="Configuration hierarchy" subtitle="One enterprise layer, team layers beneath it, agents beneath those. Each layer can only tighten the one above.">
-      <Link className="button" href="/">Resolved view</Link>
+      <Link className="button" href="/resolved">Resolved view</Link>
     </PageHead>
     <ConfigGraph />
   </>;

@@ -89,3 +89,31 @@ export const dryRunCase = (id: number, caseId: string) => api.POST("/v0/publish-
 export const continuePublish = (id: number) => api.POST("/v0/publish-runs/{id}/continue", { params: { path: { id } } });
 export const listApprovals = (status: "pending" | "decided" | "all") => api.GET("/v0/approvals", { params: { query: { status } } });
 export const decideApproval = (id: number, decision: "approved" | "rejected") => api.POST("/v0/approvals/{id}", { params: { path: { id } }, body: { decision } });
+
+/**
+ * Routes the backend serves that contracts/openapi.yaml does not list yet (reported
+ * for a contract update). Same identity header and the same FetchResult shape as
+ * the typed client, so `call()` handles them identically.
+ */
+async function untyped(method: "GET" | "POST", path: string, body?: unknown): Promise<FetchResult> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method,
+    headers: { "X-ReAgent-User": getDemoUser(), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const parsed = await response.json().catch(() => ({}));
+  return response.ok ? { data: parsed, response } : { error: parsed, response };
+}
+
+export type TeamGrants = {
+  team: string;
+  models: string[];
+  denylist: string[];
+  connectors: { connector: string; actions: string[]; risk: Record<string, string>; resources: Record<string, string[]> }[];
+};
+/** What a team's agents may pick from. Members see their own team only (SPEC.md §2). */
+export const teamGrants = (team: string) => untyped("GET", `/v0/teams/${encodeURIComponent(team)}/grants`);
+/** The source a new agent starts from: `team:<name>` is the team's base config. */
+export const teamBase = (team: string) => `team:${team}`;
+/** Frees an agent for a new pipeline (FROZEN D17 allows one running per agent). */
+export const abandonPublish = (id: number) => untyped("POST", `/v0/publish-runs/${id}/abandon`);

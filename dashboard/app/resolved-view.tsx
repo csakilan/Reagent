@@ -134,7 +134,7 @@ export default function ResolvedView() {
   const go = (next: { agent?: string; view?: string }) => {
     const query = new URLSearchParams({ agent: next.agent ?? agent });
     if ((next.view ?? view) === "values") query.set("view", "values");
-    router.replace(`/?${query}`);
+    router.replace(`/resolved?${query}`);
   };
   const narrowed = groups.reduce((sum, g) => sum + g.settings.filter(s => s.kind === "limit").length, 0);
   const hidden = groups.reduce((sum, g) => sum + g.hidden, 0);

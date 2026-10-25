@@ -143,3 +143,18 @@ def test_already_running_names_the_pipeline_and_it_can_be_abandoned():
     assert client.post(f"/v0/publish-runs/{rid}/abandon", headers=H).json()["status"] == "abandoned"
     assert client.post("/v0/agents/pr-reviewer/publish", headers=H).status_code == 202
     STORE.runs.clear()
+
+
+def test_new_agent_preview_routes():
+    """The New agent drawer previews the team's base config before creating anything."""
+    H = {"X-ReAgent-User": "alice"}
+    base = client.get("/v0/agents/team:platform-eng/resolved", headers=H)
+    assert base.status_code == 200
+    assert not list(Draft202012Validator(SCHEMA).iter_errors(base.json()))
+    assert base.json()["effective"]["prompt"] is None                      # D3: a member's view
+    grants = client.get("/v0/teams/platform-eng/grants", headers=H).json()
+    gh = next(c for c in grants["connectors"] if c["connector"] == "github")
+    assert "pulls.read" in gh["actions"] and "pulls.merge" not in gh["actions"]
+    assert "csakilan/reagent-demo" in gh["resources"]["repo"]
+    assert client.get("/v0/teams/people-ops/grants", headers=H).status_code == 404
+    assert client.get("/v0/agents/team:people-ops/resolved", headers=H).status_code == 404

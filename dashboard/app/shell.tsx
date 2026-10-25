@@ -7,8 +7,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { API_URL, DEMO_USERS, call, getDemoUser, listApprovals, setDemoUser, type Approval } from "../lib/api";
 
 const sections = [
-  { title: "Policy", links: [{ href: "/", label: "Resolved view" }, { href: "/hierarchy", label: "Hierarchy" }] },
-  { title: "Agents", links: [{ href: "/agents", label: "Collection" }, { href: "/publish", label: "Publish pipeline" }] },
+  { title: "Agents", links: [{ href: "/", label: "Your agents" }, { href: "/publish", label: "Publish pipeline" }] },
+  { title: "Policy", links: [{ href: "/resolved", label: "Resolved view" }, { href: "/hierarchy", label: "Hierarchy" }] },
   { title: "Runs", links: [{ href: "/traces", label: "Trace viewer" }, { href: "/approvals", label: "Approvals" }] },
 ];
 

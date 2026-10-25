@@ -428,3 +428,34 @@ mark.redacted { padding: 0 4px; border-radius: 2px; background: var(--ink); colo
   .kv > div, .kv-wide > div { grid-template-columns: 1fr; gap: 2px; }
   .graph-viewport { min-height: 440px; }
 }
+
+/* New agent drawer. Opens over the collection; no page change. No shadow or
+   gradient (CLAUDE.md §10): a hairline border, and one 120ms slide on open,
+   which is a genuine state change. Colour appears only as layer tags. */
+.drawer-backdrop { position: fixed; inset: 0; z-index: 40; background: rgba(26, 26, 24, .32); }
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: min(480px, 100vw); overflow-y: auto; background: var(--background); border-left: 1px solid var(--line-strong); animation: drawer-in 120ms ease-out; }
+@keyframes drawer-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .drawer { animation: none; } }
+.drawer-head { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; background: var(--background); border-bottom: 1px solid var(--line); }
+.drawer-head h2 { margin: 0; font-size: 17px; }
+.drawer-body { padding: 4px 20px 24px; }
+.drawer-body > p { margin: 12px 0; font-size: 13.5px; }
+.drawer-choice { display: grid; gap: 8px; margin: 14px 0; padding: 0; border: 0; }
+.drawer-choice legend { margin-bottom: 6px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.choice { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; }
+.choice.selected { border-color: var(--ink); }
+.choice input { margin-top: 3px; }
+.choice > span { display: grid; gap: 4px; min-width: 0; }
+.choice small { font-size: 12.5px; color: var(--muted); }
+.choice .select { margin-top: 4px; }
+.drawer-actions { display: flex; gap: 8px; margin: 16px 0 4px; }
+.drawer-preview { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); }
+.drawer-preview h3 { margin: 0 0 4px; font-size: 14px; }
+.drawer-preview section { margin-top: 14px; }
+.drawer-preview h4 { margin: 0 0 6px; font-size: 11.5px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.drawer-preview p { font-size: 13px; }
+.drawer-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.drawer-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.drawer-list .layer-tag { min-width: 116px; }
+.drawer-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.drawer-chip { margin: 0 4px 0 0; }

@@ -1,7 +1,6 @@
-import { Suspense } from "react";
-import ResolvedView from "./resolved-view";
-import { Skeleton } from "./ui";
+import Collection from "./collection";
 
+/** Home is the team's collection: see your agents first, then start or fork one. */
 export default function Home() {
-  return <Suspense fallback={<Skeleton rows={12} />}><ResolvedView /></Suspense>;
+  return <Collection />;
 }
