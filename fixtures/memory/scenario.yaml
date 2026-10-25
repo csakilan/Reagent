@@ -158,6 +158,27 @@ runs:
           # as a second pending row; the demo reports that as a WARN.
           repeat_of: "Flag public-read S3 ACLs as high severity"
 
+  # ---------------------------------------------------------------- run D
+  # After the gate. Recall injects what platform-eng now knows as one user
+  # message after the input; the fake model says "Team memory applied" when it
+  # sees it. Then the same run again with REAGENT_MEMORY_RECALL=off.
+  D:
+    title: "PR 42 after the gate; pr-reviewer starts from platform-eng's memory"
+    agent: pr-reviewer
+    input: { repo: nmc2/infra, pr_number: 42 }
+    approval: approved
+    expect_status: succeeded
+    recall:
+      fact: "nmc2/infra keeps build artifacts in the S3 bucket nmc2-build-artifacts in us-east-1."
+      procedure: "Flag public-read S3 ACLs as high severity"          # PROMOTED by the gate
+      never: ["Keep reviews of provider bumps to one line", "LGTM"]    # REJECTED by the gate
+    curator:
+      episode_summary:
+        text: "Reviewed nmc2/infra#42 with platform-eng memory applied."
+        expect: kept
+      semantic: []
+      procedural: []
+
 # The procedural gate re-runs each reading agent's evals with the candidate in
 # its memory mocks. Real evals cost credits (~$0.05) and refuse the fake model,
 # so the default demo stubs run_evals with these pass rates. Everything else in
