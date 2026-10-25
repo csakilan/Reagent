@@ -48,7 +48,7 @@ spec:
       - name: flags-public-s3-bucket
         kind: positive
         input: { repo: nmc2/infra, pr_number: 43 }
-        mocks: { "github:pulls.read": { files: [{ path: infra/s3.tf, diff: "+  acl = \"public-read\"\n" }] },
+        mocks: { "github:pulls.read": { files: [{ path: infra/s3.tf, diff: "@@ -1,4 +1,5 @@\n resource \"aws_s3_bucket\" \"artifacts\" {\n   bucket = \"nmc2-build-artifacts\"\n+  acl    = \"public-read\"\n }\n" }] },
                  "github:pulls.comment": { ok: true, comment_id: 9001 }, "agent:secret-scanner": { findings: [] },
                  "memory:search": { results: [{ text: "Never allow public-read ACLs on infra buckets." }] },
                  "memory:read": { entries: [] } }
@@ -81,7 +81,8 @@ spec:
       Review the pull request by following these steps in order. Call each tool once.
       1. Read the pull request and its diff with github:pulls.read.
       2. Call agent:secret-scanner on the diff.
-      3. Write the review: bugs, security issues and style problems, each with file and line.
+      3. Write the review: bugs, security issues and style problems. Start every finding with
+         the file path from the diff and the line, for example "infra/main.tf:12 - ...".
          Check Terraform changes for public S3 buckets and open security groups. Include the
          secret-scanner findings, by file and line, never the secret itself.
       4. Post the full review with github:pulls.comment. This step is required: the task is
