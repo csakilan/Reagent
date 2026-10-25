@@ -203,13 +203,15 @@ async def _build(spec: dict[str, Any], recorder: Recorder, ctx: RunCtx, checkpoi
     return _Built(agent=agent, grants=grants, model_cfg=model_cfg)
 
 
-def root_connector_headers(recorder: Recorder) -> dict[str, str]:
+def root_connector_headers(recorder: Recorder, user: str | None = None) -> dict[str, str]:
     """Trusted identity headers for the MCP wrappers, set by the runtime alone
     and computed ONCE at the root run (connectors/README.md): the wrappers
     check team membership and source run against these, so a child run
-    inherits its root's. Numeric database ids, omitted when unknown."""
+    inherits its root's. Numeric database ids, omitted when unknown; plus the
+    root user's NAME, which the platform connector filters by (it works
+    without a database, where there are no numeric ids)."""
     h = {"X-Reagent-Run-ID": recorder.run_id, "X-Reagent-Team-ID": recorder.team_id,
-         "X-Reagent-User-ID": recorder.user_id}
+         "X-Reagent-User-ID": recorder.user_id, "X-Reagent-User": user}
     return {k: str(v) for k, v in h.items() if v is not None}
 
 
@@ -476,7 +478,7 @@ async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger:
                      chain=(p.chain if p else ()) + (spec["agent"],),
                      parent_span_id=p.span_id if p else None,
                      connector_headers=(p.connector_headers if p else
-                                        root_connector_headers(recorder)))
+                                        root_connector_headers(recorder, user)))
         _prerun_checks(spec, recorder, grants, p, user, trigger,
                        charge_team=charge_team, charge_team_cap_usd=charge_team_cap_usd)
         # Durable (Postgres) only when a pause could be resumed elsewhere. Eval

@@ -93,7 +93,22 @@ def _memory_handler(mcp_tool: str):
     return run
 
 
-_HANDLERS = {"github": _github_handler, "memory": _memory_handler}
+def _platform_handler(mcp_tool: str, user: str | None = None):
+    """Not a stand-in: the real platform actions, called in-process instead of
+    over MCP, filtered by the root run's user exactly as the server is."""
+    action = next(a["action"] for a in connector_actions()["connectors"]["platform"]["actions"]
+                  if a["mcp_tool"] == mcp_tool)
+
+    async def run(**kw: Any) -> str:
+        from runtime.api.platform import PlatformError, call
+        try:
+            return json.dumps(call(action, user, kw), default=str)
+        except PlatformError as e:
+            return f"Error executing tool {mcp_tool}: {e}"
+    return run
+
+
+_HANDLERS = {"github": _github_handler, "memory": _memory_handler, "platform": _platform_handler}
 
 _ARG_SCHEMAS: dict[str, dict[str, Any]] = {
     "github": {"type": "object", "properties": {
@@ -103,6 +118,9 @@ _ARG_SCHEMAS: dict[str, dict[str, Any]] = {
     "memory": {"type": "object", "properties": {
         "bucket": {"type": "string"}, "query": {"type": "string"}, "key": {"type": "string"}},
         "required": ["bucket"]},
+    "platform": {"type": "object", "properties": {
+        "query": {"type": "string"}, "limit": {"type": "integer"}, "name": {"type": "string"},
+        "team": {"type": "string"}, "spec_yaml": {"type": "string"}}},
 }
 
 
@@ -113,6 +131,11 @@ def fake_connector(connector: str) -> list[StructuredTool]:
     if spec is None:
         return []
     handler = _HANDLERS.get(connector, lambda t: _memory_handler(t))
+    if connector == "platform":
+        # The caller, from the headers load_tools sets while it lists the tools.
+        from runtime.engine.binding import _WRAPPER_HEADERS
+        user = _WRAPPER_HEADERS.get().get("X-Reagent-User")
+        handler = lambda t: _platform_handler(t, user)  # noqa: E731
     schema = _ARG_SCHEMAS.get(connector, {"type": "object", "properties": {}})
     tools = []
     for a in spec["actions"]:
