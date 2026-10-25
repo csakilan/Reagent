@@ -154,11 +154,13 @@ async def _build(spec: dict[str, Any], recorder: Recorder, ctx: RunCtx, checkpoi
     tools = await load_tools(grants)
     tools += make_agent_tools(eff.get("sub_agents") or [], ctx, recorder)
 
-    model = build_model(model_cfg)
+    has_tools = bool(tools)
+    prompt = prompt + tool_map_note(grants, eff.get("sub_agents") or [])
+    model = build_model(model_cfg, has_tools=has_tools)
     budget = BudgetMiddleware(ctx.limit_usd, recorder, model_cfg.get("id", "?"),
                               model_cfg.get("openrouter_model", "?"), ctx=ctx)
     middleware: list[Any] = [ModelGuardMiddleware(recorder, recorder.redactor)]
-    fb = build_model(model_cfg, fallback=True)
+    fb = build_model(model_cfg, fallback=True, has_tools=has_tools)
     if fb is not None and model_cfg.get("fallback_openrouter_model") != model_cfg.get("openrouter_model"):
         middleware.append(ModelFallbackMiddleware(fb))
     middleware.append(budget)
@@ -175,6 +177,21 @@ async def _build(spec: dict[str, Any], recorder: Recorder, ctx: RunCtx, checkpoi
     agent = create_agent(model, tools=tools, system_prompt=prompt, middleware=middleware,
                          checkpointer=checkpointer, name=spec.get("agent"))
     return _Built(agent=agent, grants=grants, model_cfg=model_cfg)
+
+
+def tool_map_note(grants: GrantSet, sub_agents: list[dict[str, Any]]) -> str:
+    """Prompts name permissions (`github:pulls.comment`) but tool names cannot
+    contain dots or colons, so the model sees `github__pulls_comment`. Without
+    this map a live model wrote "[Comment on ...]" as text instead of calling
+    the tool. Appended to the SAME single system message (FROZEN D21 keeps one
+    system message; this is a platform-written tail after the three layers)."""
+    from runtime.guardrails.permissions import agent_tool_name
+    pairs = [(g.permission, g.tool) for g in grants.grants.values()]
+    pairs += [(f"agent:{sa['name']}", agent_tool_name(sa["name"])) for sa in sub_agents]
+    if not pairs:
+        return ""
+    return ("\n\nTool names: when these instructions name a permission, call the matching "
+            "tool. " + "; ".join(f"{a} -> {b}" for a, b in pairs) + ".")
 
 
 def _grants_for(spec: dict[str, Any], parent: ParentCtx | None) -> GrantSet:

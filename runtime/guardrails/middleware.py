@@ -40,6 +40,22 @@ class RunState(AgentState):
     halted: NotRequired[str]          # an E_ code when a limit stopped the run
 
 
+def model_cost(meta: dict[str, Any]) -> float:
+    """Dollar cost of one completed call. Never usage_metadata (tokens only).
+
+    Verified live 2026-10-25 against langchain-openai 1.7.2: a NON-streaming
+    call (which is what create_agent makes) puts OpenRouter's cost at
+    response_metadata["token_usage"]["cost"], not response_metadata["cost"]
+    as docs/research/openrouter.md says. Read both, top level first."""
+    for v in (meta.get("cost"), (meta.get("token_usage") or {}).get("cost")):
+        if v is not None:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                pass
+    return 0.0
+
+
 def _summary(content: Any, limit: int = 300) -> str:
     s = content if isinstance(content, str) else json.dumps(content, default=str)
     return s if len(s) <= limit else s[:limit] + f"... ({len(s)} chars)"
@@ -210,7 +226,7 @@ class BudgetMiddleware(AgentMiddleware):
         last = state["messages"][-1]
         meta = getattr(last, "response_metadata", {}) or {}
         usage = getattr(last, "usage_metadata", None) or {}
-        cost = float(meta.get("cost") or 0.0)  # never usage_metadata: tokens only
+        cost = model_cost(meta)
         total = float(state.get("cost_usd") or 0.0) + cost
         upd: dict[str, Any] = {
             "cost_usd": total,

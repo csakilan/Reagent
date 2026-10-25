@@ -32,7 +32,15 @@ def connector_mode() -> str:
     return os.environ.get("REAGENT_CONNECTORS", "fake").strip().lower()
 
 
-def build_model(model: dict[str, Any], *, fallback: bool = False):
+def _rejects_temperature(or_id: str) -> bool:
+    """OpenAI reasoning models (gpt-5*, o-series) refuse `temperature`. With
+    require_parameters on, sending it filters out every endpoint and OpenRouter
+    answers 404 "No endpoints found". Found live with secret-scanner on gpt-5-mini."""
+    name = or_id.split("/", 1)[-1]
+    return name.startswith(("gpt-5", "o1", "o3", "o4"))
+
+
+def build_model(model: dict[str, Any], *, fallback: bool = False, has_tools: bool = True):
     """ChatOpenAI against OpenRouter. Cost is read from
     response_metadata["cost"], which langchain-openai only fills from 1.1.11."""
     or_id = model.get("fallback_openrouter_model" if fallback else "openrouter_model")
@@ -43,16 +51,21 @@ def build_model(model: dict[str, Any], *, fallback: bool = False):
         return FakeChatModel(model_name=f"fake/{or_id}")
     from langchain_openai import ChatOpenAI
     params = dict(model.get("params") or {})
+    temperature = None if _rejects_temperature(or_id) else params.get("temperature")
     return ChatOpenAI(
         model=or_id,
         base_url=OPENROUTER_BASE_URL,
         api_key=os.environ.get("OPENROUTER_API_KEY"),
         stream_usage=True,
-        temperature=params.get("temperature"),
+        temperature=temperature,
         max_tokens=params.get("max_tokens"),
-        # supported_parameters is a union across providers; force routing to
-        # endpoints that genuinely support tool calls.
-        extra_body={"provider": {"require_parameters": True}},
+        # OFF by default. Verified live: with require_parameters on, OpenRouter
+        # intermittently 404s "No endpoints found" for qwen-coder at the
+        # "Filter by Parameters" step, and the fallback model fails the same
+        # way, killing the run. OpenRouter already routes tool requests only to
+        # tool-capable providers. Opt in with REAGENT_REQUIRE_PARAMETERS=1.
+        extra_body=({"provider": {"require_parameters": True}}
+                    if has_tools and os.environ.get("REAGENT_REQUIRE_PARAMETERS") == "1" else None),
         max_retries=1,
         timeout=120,
     )

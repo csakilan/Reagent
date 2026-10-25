@@ -140,3 +140,17 @@ def test_connector_drift_fails_loudly(monkeypatch):
                         lambda c: [t for t in real(c) if t.name != "pulls_comment"])
     r = run_agent("pr-reviewer", PR42)
     assert r["status"] == "denied" and "E_CONNECTOR_DRIFT" in r["error"]
+
+
+def test_cost_is_read_where_langchain_openai_actually_puts_it():
+    """Live finding: non-streaming calls carry cost under token_usage."""
+    from runtime.guardrails.middleware import model_cost
+    assert model_cost({"cost": 0.25}) == 0.25
+    assert model_cost({"token_usage": {"cost": 4.5e-06}}) == 4.5e-06
+    assert model_cost({"token_usage": {"prompt_tokens": 3}}) == 0.0
+
+
+def test_reasoning_models_get_no_temperature():
+    from runtime.engine.binding import _rejects_temperature
+    assert _rejects_temperature("openai/gpt-5-mini")
+    assert not _rejects_temperature("qwen/qwen3-coder-30b-a3b-instruct")
