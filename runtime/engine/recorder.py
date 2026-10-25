@@ -45,28 +45,106 @@ def _connect(url: str):
     return psycopg.connect(url, autocommit=True, connect_timeout=10)
 
 
+#: One connection per URL per process, shared by every Recorder in it. Tiger
+#: is ~100ms away and a connect costs ~0.6s, so a fresh one per run (and per
+#: child run) was most of a run's wall time. Pools stay small (runtime/AGENTS.md).
+_SHARED: dict[str, Any] = {}
+_SHARED_LOCK = threading.Lock()
+
+
+def _shared_conn(url: str):
+    with _SHARED_LOCK:
+        c = _SHARED.get(url)
+        if c is None or c.closed or c.broken:
+            c = _SHARED[url] = _connect(url)
+        return c
+
+
+class _EventWriter:
+    """Background writer for run_events. A trace event never needs to block
+    the run, and one INSERT round trip per event made a Tiger run ~13s.
+    `seq` is assigned before enqueueing, so order is exact; flush() waits
+    until everything queued is committed, and every run flushes before it
+    returns, so a caller reading the trace after run_agent() sees all of it.
+    Checkpoints are NOT written here: they stay synchronous (durability="sync")."""
+
+    def __init__(self, url: str) -> None:
+        import queue
+        self.url = url
+        self.q: "queue.Queue[tuple]" = queue.Queue()
+        self.error: Exception | None = None
+        self.t = threading.Thread(target=self._loop, name="run-events-writer", daemon=True)
+        self.t.start()
+
+    def _loop(self) -> None:
+        import queue
+        conn = None
+        while True:
+            batch = [self.q.get()]
+            while len(batch) < 200:
+                try:
+                    batch.append(self.q.get_nowait())
+                except queue.Empty:
+                    break
+            try:
+                if conn is None or conn.closed or conn.broken:
+                    conn = _connect(self.url)
+                with conn.cursor() as cur:
+                    cur.executemany(
+                        "insert into run_events (run_id, seq, type, action, allowed, payload_redacted)"
+                        " values (%s,%s,%s,%s,%s,%s)", batch)
+            except Exception as e:  # noqa: BLE001 — surfaced on flush, never swallowed
+                self.error = e
+                log.error("run_events write failed: %s", type(e).__name__)
+            finally:
+                for _ in batch:
+                    self.q.task_done()
+
+    def put(self, row: tuple) -> None:
+        self.q.put(row)
+
+    def flush(self) -> None:
+        self.q.join()
+        if self.error is not None:
+            err, self.error = self.error, None
+            raise RuntimeError(f"run_events write failed: {err}") from err
+
+
+_WRITERS: dict[str, _EventWriter] = {}
+_AV_CACHE: dict[tuple, tuple[int, int | None]] = {}
+
+
+def _writer(url: str) -> _EventWriter:
+    with _SHARED_LOCK:
+        w = _WRITERS.get(url)
+        if w is None or not w.t.is_alive():
+            w = _WRITERS[url] = _EventWriter(url)
+        return w
+
+
 @dataclass
 class Recorder:
     redactor: Redactor
     url: str | None = field(default_factory=database_url)
     run_id: int | None = None
     _seq: int = 0
-    _conn: Any = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     # -- connection ---------------------------------------------------------
     @property
     def db(self):
-        if self.url and self._conn is None:
-            self._conn = _connect(self.url)
-        return self._conn
+        if not self.url:
+            return None
+        return _shared_conn(self.url)
+
+    def flush(self) -> None:
+        """Block until every queued run_events row is committed."""
+        if self.url:
+            _writer(self.url).flush()
 
     def close(self) -> None:
-        if self._conn is not None:
-            try:
-                self._conn.close()
-            finally:
-                self._conn = None
+        # The connection is shared for the process; only drain our events.
+        self.flush()
 
     # -- runs ---------------------------------------------------------------
     def start_run(self, *, agent: str, version: str, level: str, team: str | None,
@@ -93,6 +171,7 @@ class Recorder:
         """Re-attach to an existing run on resume; continue its seq."""
         self.run_id = run_id
         if self.db:
+            self.flush()
             r = self.db.execute("select coalesce(max(seq), -1) from run_events where run_id=%s",
                                 (run_id,)).fetchone()
             self._seq = int(r[0]) + 1
@@ -166,11 +245,8 @@ class Recorder:
                  "payload_redacted": payload})
             return
         import psycopg.types.json as pj
-        self.db.execute(
-            "insert into run_events (run_id, seq, type, action, allowed, payload_redacted)"
-            " values (%s,%s,%s,%s,%s,%s)",
-            (self.run_id, seq, type_, action, allowed,
-             pj.Jsonb(payload) if payload is not None else None))
+        _writer(self.url).put((self.run_id, seq, type_, action, allowed,
+                               pj.Jsonb(payload) if payload is not None else None))
 
     def span_open(self, name: str, parent: str | None = None, **extra: Any) -> str:
         sid = uuid.uuid4().hex[:16]
@@ -246,20 +322,21 @@ class Recorder:
             return {"enterprise": agg(lambda r: True),
                     "team": agg(lambda r: team is not None and r["team"] == team),
                     "agent": agg(lambda r: r["agent"] == agent)}
-        q = ("select coalesce(sum(r.cost_usd),0), count(*) filter (where r.status='running')"
-             " from runs r join agent_versions av on av.id=r.agent_version_id"
-             " join agents a on a.id=av.agent_id left join teams t on t.id=r.team_id"
-             " where r.started_at >= date_trunc('month', now()) and r.parent_run_id is null")
-        out = {}
-        for layer, extra, args in (("enterprise", "", ()),
-                                   ("team", " and t.name=%s", (team,)),
-                                   ("agent", " and a.name=%s", (agent,))):
-            if layer == "team" and team is None:
-                out[layer] = {"usd_month": 0.0, "running": 0}
-                continue
-            row = self.db.execute(q + extra, args).fetchone()
-            out[layer] = {"usd_month": float(row[0]), "running": int(row[1])}
-        return out
+        # One round trip for all three layers.
+        row = self.db.execute(
+            "select coalesce(sum(r.cost_usd),0),"
+            " count(*) filter (where r.status='running'),"
+            " coalesce(sum(r.cost_usd) filter (where t.name=%s),0),"
+            " count(*) filter (where r.status='running' and t.name=%s),"
+            " coalesce(sum(r.cost_usd) filter (where a.name=%s),0),"
+            " count(*) filter (where r.status='running' and a.name=%s)"
+            " from runs r join agent_versions av on av.id=r.agent_version_id"
+            " join agents a on a.id=av.agent_id left join teams t on t.id=r.team_id"
+            " where r.started_at >= date_trunc('month', now()) and r.parent_run_id is null",
+            (team, team, agent, agent)).fetchone()
+        return {"enterprise": {"usd_month": float(row[0]), "running": int(row[1])},
+                "team": {"usd_month": float(row[2]), "running": int(row[3])},
+                "agent": {"usd_month": float(row[4]), "running": int(row[5])}}
 
     # -- lookups / get-or-create -------------------------------------------
     def _user_id(self, name: str | None) -> int | None:
@@ -272,7 +349,17 @@ class Recorder:
                        access: str | None, spec_doc: dict[str, Any] | None) -> tuple[int, int | None]:
         """Find the agent_versions row. If the seed has not created it, create a
         minimal one rather than fail the run: a missing seed row must not be
-        what kills the demo. Logged loudly."""
+        what kills the demo. Logged loudly. Cached per process: ids are stable."""
+        key = (self.url, agent, version, team)
+        if key in _AV_CACHE:
+            return _AV_CACHE[key]
+        _AV_CACHE[key] = found = self._agent_version_uncached(agent, version, level, team,
+                                                              access, spec_doc)
+        return found
+
+    def _agent_version_uncached(self, agent: str, version: str, level: str, team: str | None,
+                                access: str | None,
+                                spec_doc: dict[str, Any] | None) -> tuple[int, int | None]:
         team_id = None
         if team:
             r = self.db.execute("select id from teams where name=%s", (team,)).fetchone()

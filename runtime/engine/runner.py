@@ -103,12 +103,25 @@ _MEMORY_SAVER = None
 class _Checkpointer:
     """async context manager yielding a checkpointer. AsyncPostgresSaver with
     setup() run once per process; InMemorySaver only without a database, in
-    which case resume works within this process and nowhere else."""
+    which case resume works within this process and nowhere else.
+
+    `durable=False` is for runs that can never pause: no approval-gated tool
+    means no interrupt, so nothing ever resumes from the checkpoint. Those get
+    a throwaway InMemorySaver, which saves several Tiger round trips per graph
+    step (~100ms each from the venue). Anything that CAN pause stays on
+    Postgres with durability="sync"."""
 
     _setup_done = False
 
+    def __init__(self, durable: bool = True) -> None:
+        self.durable = durable
+
     async def __aenter__(self):
         url = database_url()
+        if url and not self.durable:
+            from langgraph.checkpoint.memory import InMemorySaver
+            self._cm = None
+            return InMemorySaver()
         if url:
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
             self._cm = AsyncPostgresSaver.from_conn_string(url)
@@ -410,7 +423,8 @@ async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger:
                      chain=(p.chain if p else ()) + (spec["agent"],),
                      parent_span_id=p.span_id if p else None)
         _prerun_checks(spec, recorder, grants, p, user, trigger)
-        async with _Checkpointer() as saver:
+        can_pause = any(g.requires_approval for g in grants.grants.values())
+        async with _Checkpointer(durable=can_pause) as saver:
             built = await _build(spec, recorder, ctx, saver, grants)
             config = {"configurable": {"thread_id": f"run-{ctx.run_id}"},
                       "recursion_limit": max(25, (limit_steps or 25) * 4 + 10)}
