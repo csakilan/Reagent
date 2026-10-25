@@ -78,11 +78,15 @@ spec:
     deny: ["github:pulls.merge"]
   prompt:
     task: |
-      Review the pull request. Read the diff with github:pulls.read.
-      Report bugs, security issues and style problems. Check Terraform changes for public
-      S3 buckets and open security groups. Before finishing, call agent:secret-scanner on the
-      diff and include its findings. You MUST finish by posting the full review with
-      github:pulls.comment. Do not end with the review only in your answer.
+      Review the pull request by following these steps in order. Call each tool once.
+      1. Read the pull request and its diff with github:pulls.read.
+      2. Call agent:secret-scanner on the diff.
+      3. Write the review: bugs, security issues and style problems, each with file and line.
+         Check Terraform changes for public S3 buckets and open security groups. Include the
+         secret-scanner findings, by file and line, never the secret itself.
+      4. Post the full review with github:pulls.comment. This step is required: the task is
+         not complete until the review is posted as a comment.
+      5. Only after posting, reply with a short summary of what you posted.
   memory:
     - { bucket: platform-eng-notes, mode: read }
     - { bucket: platform-eng-runbooks, mode: read }
