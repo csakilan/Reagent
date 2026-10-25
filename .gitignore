@@ -20,3 +20,7 @@ build/
 
 # Database credentials. Never commit.
 *credentials*.env
+
+# Runtime environment, created by scripts/envs.py. See its docstring
+# for why there are two and why they cannot be merged.
+.venv-runtime/

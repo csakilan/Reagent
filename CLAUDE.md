@@ -190,6 +190,39 @@ against the fake. Spend credits only on demo rehearsal.**
 
 ---
 
+## 7b. TWO virtualenvs, and they cannot be merged
+
+`python scripts/envs.py` builds both. This is not tidiness, it is forced:
+
+| | needs | because |
+|---|---|---|
+| `.venv-runtime` | `mcp` **1.x** | `langchain-mcp-adapters==0.3.2` pins `mcp<2.0.0` |
+| `.venv` | `mcp` **2.x** | `connectors/common.py` uses `from mcp.server import MCPServer`, the v2 API |
+
+`pip install -r` of both requirements files fails with `ResolutionImpossible`.
+There is no pin that fixes it: adapters 0.3.1 drops the upper bound but then
+fails to import against mcp 2.x, so the cap in 0.3.2 is honest.
+
+It is harmless because they are separate processes talking over HTTP, and the v2
+server serves both protocol eras routed by the `MCP-Protocol-Version` header.
+**Verified end to end on 2026-10-25**: an mcp 1.30.0 client completed discovery
+and an authenticated tool call against an mcp 2.3.0 wrapper, returning real rows
+from Tiger Cloud, with the auth gate refusing an unauthenticated call (401) and
+the bucket ACL refusing a cross-team read.
+
+**What this means for you.** Run wrappers from `.venv` and everything else from
+`.venv-runtime`. Never install one side's requirements into the other
+environment: putting `langchain-mcp-adapters` into `.venv` drags `mcp` down to
+1.x and every wrapper then fails to import.
+`tests/contract/test_two_environments.py` guards this, and
+`python scripts/envs.py --verify` checks it.
+
+```
+python scripts/envs.py                              # build both
+python scripts/wrappers.py                          # 7100 memory, 7101 slack, 7102 github
+.venv-runtime/bin/python -m pytest tests -q         # 270 passing
+```
+
 ## 8. Laptops: 1 macOS, 3 Windows
 
 Run this first, on every machine, and fix anything it marks BAD:

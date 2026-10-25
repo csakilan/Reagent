@@ -312,7 +312,16 @@ async def _lifespan(_app: FastAPI):
     tasks died with each asyncio.run, leaving curator runs stuck in 'running'.)"""
     from runtime.engine import memory_curation
     memory_curation.enable_background()
-    yield
+    async with _platform_lifespan():
+        yield
+
+
+def _platform_lifespan():
+    """The platform connector's MCP session manager, when the server could be built."""
+    if _PLATFORM_MOUNTED:
+        from runtime.api import platform
+        return platform.lifespan()
+    return contextlib.nullcontext()
 
 
 app = FastAPI(title="ReAgent runtime", version="0", lifespan=_lifespan)
@@ -323,3 +332,11 @@ try:  # WF2's routes, when they exist
     app.include_router(_agents_router)
 except Exception:  # noqa: BLE001
     pass
+_PLATFORM_MOUNTED = False
+try:  # the platform connector, /mcp/platform (connector_actions.json)
+    from runtime.api import platform as _platform
+    _platform.mount(app)
+    _PLATFORM_MOUNTED = True
+except Exception:  # noqa: BLE001 — the HTTP API must come up without it
+    import logging
+    logging.getLogger("runtime.api").exception("platform connector not mounted")

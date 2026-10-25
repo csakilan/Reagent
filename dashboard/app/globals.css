@@ -459,6 +459,17 @@ mark.redacted { padding: 0 4px; border-radius: 2px; background: var(--ink); colo
 .drawer-list .layer-tag { min-width: 116px; }
 .drawer-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .drawer-chip { margin: 0 4px 0 0; }
+.textarea { height: auto; padding: 6px 10px; resize: vertical; line-height: 1.45; }
+.drawer-suggest { margin: 4px 0 14px; }
+.drawer-suggest h4 { margin: 0 0 6px; font-size: 11.5px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.suggest-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: var(--radius); }
+.suggest-list li { display: grid; gap: 4px; padding: 10px 12px; font-size: 13px; }
+.suggest-list li + li { border-top: 1px solid var(--line); }
+.suggest-list li.selected { outline: 1px solid var(--ink); outline-offset: -1px; }
+.suggest-list p { margin: 0; }
+.suggest-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.suggest-head .button { margin-left: auto; }
+.match-reason { font-size: 12px; }
 
 /* Publish pipeline as a CI run: one collapsed row per step, expanding on demand.
    Colour only through Verdict (verdict) and the status pill below. */

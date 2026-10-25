@@ -30,6 +30,7 @@ identity fields. The runtime alone sets these HTTP headers per root run:
 | `X-Reagent-User-ID` | Root session principal, required for memory and user auth |
 | `X-Reagent-Team-ID` | Root run's team, required for memory |
 | `X-Reagent-Run-ID` | Source run for memory writes |
+| `X-Reagent-User` | Root user's name; the platform connector (`/mcp/platform` in the runtime) filters by it |
 | `X-Reagent-Invocation` | `system` only for runtime-generated episodic writes |
 
 The memory wrapper checks membership and admin status in Postgres rather than

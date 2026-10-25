@@ -2,9 +2,35 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { DRAFT_KEY, call, forkAgent, resolvedAgent, teamBase, teamGrants, type AgentDetail, type AgentSummary, type Rejection, type TeamGrants } from "../lib/api";
+import { DRAFT_KEY, call, forkAgent, listAgents, resolvedAgent, teamBase, teamGrants, type AgentDetail, type AgentSummary, type Rejection, type TeamGrants } from "../lib/api";
 import { useLive } from "../lib/live";
-import { Failure, Rejections, Skeleton, Verdict, usd } from "./ui";
+import { Failure, Rejections, Skeleton, Verdict, pct, usd } from "./ui";
+
+/** GET /v0/agents?q= adds why each hit matched (runtime/api/agent_search.py). */
+type Match = AgentSummary & { match?: { score: number; reason: string; matched: string[] } };
+
+/** The team's agents closest to what the new one should achieve, ranked on the server by outcome. */
+function Suggestions({ team, term, chosen, onFork }: {
+  team: string; term: string; chosen: string | null; onFork: (name: string) => void;
+}) {
+  const [state] = useLive<{ agents: Match[] }>(term && team ? `suggest:${team}:${term}` : null, () => listAgents(term));
+  if (!term || !team) return null;
+  if (state.phase === "loading") return <Skeleton rows={3} columns={1} label="Finding agents with a similar outcome" />;
+  if (state.phase === "error") return null;   // suggestions are a shortcut; the form still works
+  const hits = state.data.agents.filter(a => a.team === team).slice(0, 3);
+  return <section className="drawer-suggest" aria-label="Agents with a similar outcome">
+    <h4>Closest by outcome in {team}</h4>
+    {!hits.length ? <p className="muted">No agent in {team} achieves something similar. Start from the base config.</p>
+      : <ul className="suggest-list">{hits.map(a => <li key={a.name} className={chosen === a.name ? "selected" : undefined}>
+        <div className="suggest-head"><code>{a.name}</code><span className="muted">{a.version}</span>
+          {a.pass_rate != null && <span className="muted num">{pct(a.pass_rate)} eval pass</span>}
+          <button className="button" type="button" onClick={() => onFork(a.name)} disabled={chosen === a.name}>
+            {chosen === a.name ? "Forking this" : "Fork this"}</button></div>
+        {a.desired_outcome && <p>{a.desired_outcome}</p>}
+        {a.match && <small className="muted">{a.match.reason}</small>}
+      </li>)}</ul>}
+  </section>;
+}
 import { layerName, layerOf, type Leaf } from "../lib/resolved";
 
 /** The fork route also returns how the new draft resolves; AgentDetail does not list it. */
@@ -108,7 +134,14 @@ export default function NewAgentDrawer({ team, agents, initialFork, onClose, onC
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<{ detail: string; rejections: Rejection[] } | null>(null);
   const [created, setCreated] = useState<Created | null>(null);
+  const [goal, setGoal] = useState("");
+  const [term, setTerm] = useState("");
+  useEffect(() => { const timer = setTimeout(() => setTerm(goal.trim().length >= 3 ? goal.trim() : ""), 400); return () => clearTimeout(timer); }, [goal]);
 
+  // Opened from /agents?new=1 the drawer mounts before the user and agents load,
+  // so the team is unknown at first; take it as soon as it is.
+  const fallbackTeam = team ?? teams[0] ?? "";
+  useEffect(() => { if (!targetTeam && fallbackTeam) setTargetTeam(fallbackTeam); }, [targetTeam, fallbackTeam]);
   // Keep the fork source inside the chosen team.
   useEffect(() => {
     if (!forkable.some(a => a.name === forkFrom)) setForkFrom(forkable[0]?.name ?? "");
@@ -154,6 +187,12 @@ export default function NewAgentDrawer({ team, agents, initialFork, onClose, onC
           <select className="select" value={targetTeam} onChange={event => setTargetTeam(event.target.value)}>
             {teams.map(t => <option key={t} value={t}>{t}</option>)}</select></label>}
 
+        <label className="field"><span>What should it achieve?</span>
+          <textarea className="input textarea" rows={2} value={goal} placeholder="Every PR touching Terraform gets flagged if it opens a bucket to the public"
+            onChange={event => setGoal(event.target.value)} /></label>
+        <Suggestions team={targetTeam} term={term} chosen={mode === "fork" ? forkFrom : null}
+          onFork={agent => { setMode("fork"); setForkFrom(agent); }} />
+
         <fieldset className="drawer-choice">
           <legend>Start from</legend>
           <label className={mode === "base" ? "choice selected" : "choice"}>
@@ -181,7 +220,7 @@ export default function NewAgentDrawer({ team, agents, initialFork, onClose, onC
           <button className="button" type="button" onClick={onClose}>Cancel</button>
         </div>
 
-        {source && <Preview key={source} source={source} team={targetTeam} />}
+        {source && targetTeam && <Preview key={source} source={source} team={targetTeam} />}
       </form>}
     </aside>
   </>;
