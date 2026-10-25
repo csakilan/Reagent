@@ -59,6 +59,10 @@ def repo_root() -> str:
     return git("rev-parse", "--show-toplevel").strip()
 
 
+def _on_branch(name: str) -> bool:
+    return git("rev-parse", "--abbrev-ref", "HEAD", check=False).strip() == name
+
+
 def fetch() -> None:
     p = subprocess.run(
         ["git", "fetch", REMOTE, MAIN, "--quiet"], capture_output=True, text=True,
@@ -103,6 +107,15 @@ def write_board(raw_text: str, message: str) -> None:
         )
         if p.returncode == 0:
             print(f"{C['green']}pushed to {MAIN}{C['reset']}  {commit[:9]}  {message}")
+            # This wrote straight to the remote without touching your checkout,
+            # which is the point: it works from any branch. The side effect is
+            # that a LOCAL main is now behind, so a later `git push origin main`
+            # from this clone is rejected as non-fast-forward. Harmless, and the
+            # fix is `git pull --rebase origin main`.
+            if _on_branch(MAIN):
+                print(f"  {C['dim']}you are on {MAIN} locally: run "
+                      f"`git pull --rebase origin {MAIN}` before your next push"
+                      f"{C['reset']}")
             return
         if "non-fast-forward" in p.stderr or "fetch first" in p.stderr or "rejected" in p.stderr:
             print(f"{C['dim']}main moved, retrying ({attempt + 1}/5){C['reset']}", file=sys.stderr)
