@@ -77,7 +77,8 @@ ALIASES = {"pr": ("pull", "request"), "prs": ("pull", "request"), "hr": ("hr", "
 
 def _stem(w: str) -> str:
     for suf in ("ations", "ation", "ings", "ing", "iest", "ies", "est", "ers", "er", "ed", "es", "ly", "s"):
-        if len(w) > len(suf) + 2 and w.endswith(suf):
+        # "est" only when a real word is left: cheapest -> cheap, never request -> requ
+        if len(w) > len(suf) + (4 if suf in ("est", "iest") else 2) and w.endswith(suf):
             s = w[: -len(suf)] + ("y" if suf in ("ies", "iest") else "")
             if suf in ("ed", "ing", "er", "ers") and len(s) > 3 and s[-1] == s[-2] and s[-1] not in "aeiouls":
                 s = s[:-1]  # committed -> commit, flagged -> flag

@@ -46,6 +46,7 @@ export default function Collection() {
           <Link className="agent-name" href={`/agents/${agent.name}/edit`}>{agent.name}</Link>
           <p>{agent.description}</p>
           {agent.desired_outcome && <p className="muted">Outcome · {agent.desired_outcome}</p>}
+          {term && "match" in agent && <p className="muted match-reason">{(agent as AgentSummary & { match: { reason: string } }).match.reason}</p>}
           <div className="tags">{(agent.tags ?? []).map(tag => <span className="tag" key={tag}>{tag}</span>)}{agent.forked_from && <span className="tag">forked from {agent.forked_from}</span>}{agent.update_available && <span className="tag">update available</span>}</div>
         </div>
         <span>{agent.team ?? "enterprise"}</span>

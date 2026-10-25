@@ -70,6 +70,13 @@ def test_measured_results_only_break_ties(docs):
     assert first[0]["name"] == "twin"
 
 
+@pytest.mark.parametrize("word,stem", [("request", "request"), ("requests", "request"),
+                                       ("cheapest", "cheap"), ("committed", "commit"),
+                                       ("flagged", "flag"), ("queries", "query")])
+def test_stemming(word, stem):
+    assert s._stem(word) == stem
+
+
 def test_nonsense_finds_nothing(docs):
     assert s.rank("zzqx flibbertigibbet", docs) == []
     assert s.rank("", docs) == []
