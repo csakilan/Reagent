@@ -244,3 +244,36 @@ def test_a_slow_store_times_out_without_failing(payloads, monkeypatch):
     monkeypatch.setattr(mc.MemoryStore, "search", slow)
     r, f = finished()
     assert f["status"] == "succeeded" and len(payloads[0]) == 1 and not recalled(r["run_id"])
+
+
+# -- the live wrapper's framing ----------------------------------------------
+
+@pytest.mark.parametrize("blocks,want", [
+    ([], []),
+    (['{"id": 1, "content": "a"}'], [{"id": 1, "content": "a"}]),
+    (['{"id": 1, "content": "a"}', '{"id": 2, "content": "b"}'],
+     [{"id": 1, "content": "a"}, {"id": 2, "content": "b"}]),
+    (['[{"id": 1, "content": "a"}]'], [{"id": 1, "content": "a"}]),
+])
+def test_live_results_parse_one_item_per_text_block(monkeypatch, blocks, want):
+    """Found live: the MCP adapter returns a list as one text block per item."""
+    import asyncio
+
+    import langchain_mcp_adapters.client as client
+
+    class Tool:
+        name = "read"
+
+        async def ainvoke(self, args):
+            return [{"type": "text", "text": t} for t in blocks]
+
+    class Client:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def get_tools(self, server_name):
+            return [Tool()]
+    monkeypatch.setattr(client, "MultiServerMCPClient", Client)
+    store = mc.MemoryStore({"X-Reagent-Run-ID": "1"})
+    store.live = True
+    assert asyncio.run(store.read("platform-eng-history", 5)) == want

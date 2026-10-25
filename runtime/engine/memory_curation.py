@@ -348,6 +348,13 @@ FAKE_BUCKETS: dict[str, dict[str, str]] = {
 }
 
 
+def _items(res: Any) -> list[dict[str, Any]]:
+    """A wrapper read/search result as a list of items, however it was framed."""
+    if isinstance(res, dict):
+        res = [res]
+    return [i for i in res if isinstance(i, dict)] if isinstance(res, list) else []
+
+
 class MemoryStore:
     """Writes go through the memory MCP wrapper with the root run's identity,
     so the wrapper's membership and bucket checks apply to curation exactly as
@@ -399,15 +406,19 @@ class MemoryStore:
                                                   "headers": headers}})
         tools = {t.name: t for t in await client.get_tools(server_name="memory")}
         res = await tools[tool].ainvoke(args)
-        text = res if isinstance(res, str) else "".join(
+        # A list result arrives as one text block PER ITEM (found live): parse
+        # each block, or a one-hit search parses to a dict and two hits to nothing.
+        texts = [res] if isinstance(res, str) else [
             b.get("text", "") if isinstance(b, dict) else str(b)
-            for b in (res if isinstance(res, list) else [res]))
+            for b in (res if isinstance(res, list) else [res])]
+        text = "".join(texts)
         if "Error executing tool" in text or text.startswith("E_"):
             raise RuntimeError(_clip(text, 200))
         try:
-            return json.loads(text)
+            parsed = [json.loads(t) for t in texts]
         except ValueError:
             return text
+        return parsed[0] if len(parsed) == 1 else parsed
 
     async def write(self, bucket: str, content: str, kind: str, run_id: int) -> dict[str, Any]:
         if not self.live:
@@ -424,16 +435,14 @@ class MemoryStore:
             q = set(_norm(query).split())
             return [i for i in FAKE_ITEMS if i["bucket"] == bucket and i["status"] == "active"
                     and q & set(_norm(i["content"]).split())]
-        res = await self._call("search", {"bucket": bucket, "query": query})
-        return res if isinstance(res, list) else []
+        return _items(await self._call("search", {"bucket": bucket, "query": query}))
 
     async def read(self, bucket: str, limit: int = 20) -> list[dict[str, Any]]:
         """Latest active entries first, like the wrapper's read."""
         if not self.live:
             return [i for i in reversed(FAKE_ITEMS)
                     if i["bucket"] == bucket and i["status"] == "active"][:limit]
-        res = await self._call("read", {"bucket": bucket, "limit": limit})
-        return res if isinstance(res, list) else []
+        return _items(await self._call("read", {"bucket": bucket, "limit": limit}))
 
     async def is_duplicate(self, bucket: str, item: dict[str, Any]) -> bool:
         """Exact (fingerprint token) or near (token Jaccard) duplicate."""
