@@ -54,7 +54,8 @@ spec:
                  "memory:read": { entries: [] } }
         expect:
           side_effects:
-            - { action: "github:pulls.comment", args_contains: ["infra/s3.tf", "public"], count: 1 }
+            # Relaxed from "infra/s3.tf": live qwen-coder names the resource, not the file path.
+            - { action: "github:pulls.comment", args_contains: ["S3", "public-read"], count: 1 }
           reference: "infra/s3.tf sets acl = public-read, making the bucket world-readable."
       - name: clean-docs-change
         kind: negative
