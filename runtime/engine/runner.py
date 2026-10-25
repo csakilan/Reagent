@@ -53,25 +53,35 @@ STEP_LIMIT_MARKER = "Model call limits exceeded"
 # Resolved spec
 # --------------------------------------------------------------------------
 
-def load_resolved(name: str) -> dict[str, Any]:
-    """The real resolver when it exists (H1), else the golden fixtures.
+def load_resolved(name: str, *, root_team: str | None = None,
+                  trigger: str | None = None) -> dict[str, Any]:
+    """The real resolver (H1), else the golden fixtures.
 
-    The runtime needs the UNREDACTED effective spec (it must send the
-    enterprise prompt to the model), so it resolves as a privileged runtime
-    principal, never as the end user: a member's view nulls enterprise values
-    (FROZEN D3). Set REAGENT_RESOLVER=fake to force fixtures."""
+    Resolves as the system principal (caller=None): the runtime needs the
+    UNREDACTED effective spec, since it must send the enterprise prompt to the
+    model, and a member's view nulls enterprise values (FROZEN D3). The end
+    user is never the resolver's caller here. `root_team` carries the root
+    run's team down a sub-agent chain (D1); `trigger` lets the resolver refuse
+    on_behalf_of tools on user-less triggers (D2).
+    Set REAGENT_RESOLVER=fake to force fixtures."""
     if os.environ.get("REAGENT_RESOLVER", "auto") != "fake":
         try:
             from runtime.resolver import resolve_agent  # type: ignore
         except ImportError:
             resolve_agent = None
         if resolve_agent is not None:
-            doc = resolve_agent(name, caller=os.environ.get("REAGENT_RUNTIME_PRINCIPAL", "frank"))
+            try:
+                doc = resolve_agent(name, caller=None, root_team=root_team, trigger=trigger)
+            except LookupError as e:
+                raise ReAgentError(Rejection(Code.SUBAGENT_NOT_CALLABLE, field="agent",
+                                             blocked_by="registry", attempted=name)) from e
             if doc.get("rejections"):
                 raise ReAgentError(*[_rejection(r) for r in doc["rejections"]])
             return doc
     from runtime.engine.fakes import resolved_spec
-    return resolved_spec(name)
+    doc = resolved_spec(name)
+    doc["_from_fixture"] = True
+    return doc
 
 
 def _rejection(r: dict[str, Any]) -> Rejection:
@@ -171,7 +181,9 @@ def _grants_for(spec: dict[str, Any], parent: ParentCtx | None) -> GrantSet:
     grants = GrantSet.from_effective(spec["effective"])
     # FROZEN D1: an enterprise agent inside a team's run is cut down to the
     # root run's grants, computed once at the root and carried down.
-    if parent is not None and spec.get("level") == "enterprise":
+    # The real resolver already applies this via root_team; the fixture path
+    # approximates the team's grants with the root agent's own permissions.
+    if parent is not None and spec.get("level") == "enterprise" and spec.get("_from_fixture"):
         grants = grants.intersect_connectors(parent.root_permissions)
     return grants
 
@@ -345,7 +357,8 @@ async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger:
     """`on_start(run_id)` fires once the runs row exists, so the API can answer
     202 with a run id while the run carries on in the background."""
     try:
-        spec = load_resolved(name)
+        spec = load_resolved(name, root_team=_parent.root_team if _parent else None,
+                             trigger=trigger)
     except ReAgentError as e:
         return _refused(Recorder(Redactor()), {"agent": name}, e)
     eff = spec["effective"]
