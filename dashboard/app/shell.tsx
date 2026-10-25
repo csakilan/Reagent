@@ -43,7 +43,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     </header>
     <div className="shell">
       <nav className="rail" aria-label="Main navigation">
-        {sections.map(section => <div className="rail-section" key={section.title}>
+        {[...sections, ...(current?.team === null ? [{ title: "Admin", links: [{ href: "/admin", label: "Enterprise admin" }] }] : [])].map(section => <div className="rail-section" key={section.title}>
           <div className="rail-title">{section.title}</div>
           {section.links.map(link => <Link key={link.href} href={link.href} className={isActive(pathname, link.href) ? "active" : undefined} aria-current={isActive(pathname, link.href) ? "page" : undefined}>
             {link.label}

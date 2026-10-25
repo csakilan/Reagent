@@ -522,3 +522,11 @@ mark.redacted { padding: 0 4px; border-radius: 2px; background: var(--ink); colo
 .start-foot { margin-top: 14px; font-size: 13px; }
 @media (max-width: 700px) { .start-step { grid-template-columns: 36px minmax(0, 1fr); } .start-step > .button { grid-column: 2; justify-self: start; } }
 .resolved-in-graph { margin-top: 18px; }
+
+/* Admin and connector requests. */
+.admin-stack { display: grid; gap: 18px; }
+.admin-stack .code-input { width: 100%; }
+.impact { margin-top: 14px; }
+.impact .is-changed { background: var(--surface); }
+.request-field { flex: 1 1 420px; }
+.request-field .input { flex: 1; min-width: 260px; }

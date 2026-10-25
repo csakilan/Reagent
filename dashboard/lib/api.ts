@@ -119,3 +119,17 @@ export const teamBase = (team: string) => `team:${team}`;
 export const abandonPublish = (id: number) => untyped("POST", `/v0/publish-runs/${id}/abandon`);
 /** Enterprise → teams → agents, filtered per caller on the server (SPEC.md §2). */
 export const hierarchy = () => untyped("GET", "/v0/hierarchy");
+
+// -- Admin and connector requests (MVP rows 8 and 9) ----------------------------
+export type ConnectorRequest = { id: number; team: string; requested_by: string; description: string; status: "open" | "fulfilled" | "rejected"; created_at: string };
+export type Impact = { agent: string; team: string | null; before: "resolves" | "rejected"; after: "resolves" | "rejected"; changed: boolean; rejections: Rejection[] };
+export type LayerReport = { saved: boolean; dry_run?: boolean; rejections: Rejection[]; impact: Impact[] };
+export type AdminLayers = { enterprise: string; teams: Record<string, string>; connectors: string[]; models: string[] };
+
+export const connectorRequests = () => untyped("GET", "/v0/connector-requests");
+export const requestConnector = (description: string, team?: string) => untyped("POST", "/v0/connector-requests", team ? { description, team } : { description });
+export const decideRequest = (id: number, status: "fulfilled" | "rejected") => untyped("POST", `/v0/connector-requests/${id}/decide`, { status });
+export const adminLayers = () => untyped("GET", "/v0/admin/layers");
+export const saveLayer = (target: string, spec: string, dryRun: boolean) =>
+  untyped("POST", target === "enterprise" ? "/v0/admin/enterprise" : `/v0/admin/teams/${encodeURIComponent(target)}`, { spec, dry_run: dryRun });
+export const registerItem = (kind: "connector" | "model", spec: string) => untyped("POST", "/v0/admin/registry", { kind, spec });

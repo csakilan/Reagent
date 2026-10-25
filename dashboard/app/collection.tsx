@@ -3,13 +3,35 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { DEMO_USERS, listAgents, type AgentSummary } from "../lib/api";
+import { DEMO_USERS, call, listAgents, requestConnector, type AgentSummary } from "../lib/api";
 import { recordedAgents } from "../lib/fixtures";
 import { useDemoUser, useLive } from "../lib/live";
 import NewAgentDrawer from "./new-agent-drawer";
-import { Failure, PageHead, Skeleton, SourceTag, pct, usd } from "./ui";
+import { Failure, PageHead, Skeleton, SourceTag, Verdict, pct, usd } from "./ui";
 
-/** The home page: the agents your team can see, run and fork, and where new ones start. */
+/** MVP row 9: a member asks enterprise admins for a connector their team was not granted. */
+function RequestConnector({ team, onClose }: { team: string | null; onClose: () => void }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  async function submit() {
+    setBusy(true); setProblem(null);
+    const outcome = await call(requestConnector(text.trim()));
+    setBusy(false);
+    if (outcome.ok) setDone(true); else setProblem(outcome.detail);
+  }
+  if (done) return <div className="row-extra"><Verdict kind="pass">Requested</Verdict> Enterprise admins see it in their queue. Once they grant it to {team ?? "your team"}, your agents can use it on their next run. <button className="text-button" type="button" onClick={onClose}>Close</button></div>;
+  return <form className="row-extra inline-form" onSubmit={event => { event.preventDefault(); if (text.trim()) submit(); }}>
+    <label className="field-inline request-field"><span>What does {team ?? "your team"} need, and why?</span>
+      <input className="input" value={text} onChange={event => setText(event.target.value)} placeholder="e.g. Slack messages.post in #ask-people-ops, to answer questions in threads" autoFocus /></label>
+    <button className="button primary" type="submit" disabled={busy || !text.trim()}>{busy ? "Sending…" : "Send request"}</button>
+    <button className="button" type="button" onClick={onClose}>Cancel</button>
+    {problem && <span className="denied-text">{problem}</span>}
+  </form>;
+}
+
+/** The team's collection: the agents your team can see, run and fork, and where new ones start. */
 export default function Collection() {
   const user = useDemoUser();
   const team = DEMO_USERS.find(item => item.id === user)?.team ?? null;
@@ -18,6 +40,7 @@ export default function Collection() {
   // /agents?new=1 (from Getting started) opens the New agent drawer straight away.
   const params = useSearchParams();
   const [drawer, setDrawer] = useState<{ fork?: string } | null>(() => params.get("new") ? {} : null);
+  const [requesting, setRequesting] = useState(false);
   useEffect(() => { const timer = setTimeout(() => setTerm(query.trim()), 250); return () => clearTimeout(timer); }, [query]);
 
   const [state, reload] = useLive<{ agents: AgentSummary[] }>(user && `agents:${user}:${term}`, () => listAgents(term || undefined), { fallback: recordedAgents });
@@ -31,8 +54,10 @@ export default function Collection() {
       ? <>Agents in <strong>{team}</strong> you can run, edit and fork. Every agent inherits the enterprise and team setup.</>
       : <>Every team&apos;s agents. You are an enterprise admin.</>}>
       <SourceTag state={state} />
+      {team && <button className="button" type="button" onClick={() => setRequesting(!requesting)}>Request a connector</button>}
       <button className="button primary" type="button" onClick={() => setDrawer({})}>New agent</button>
     </PageHead>
+    {requesting && <RequestConnector team={team} onClose={() => setRequesting(false)} />}
     <div className="search-bar">
       <input className="input" type="search" placeholder="Search by outcome, tag or name" value={query} onChange={event => setQuery(event.target.value)} aria-label="Search agents" />
       {state.phase === "ready" && <span className="muted">{agents.length} agent{agents.length === 1 ? "" : "s"}</span>}
