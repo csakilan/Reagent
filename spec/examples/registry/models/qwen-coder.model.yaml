@@ -1,0 +1,11 @@
+apiVersion: reagent/v0
+kind: Model
+metadata:
+  name: qwen-coder
+  version: 1.0.0
+  description: Open-weight coding model
+spec:
+  provider: openrouter
+  model: qwen/qwen3-coder-30b-a3b-instruct   # VERIFIED on openrouter.ai 2026-10-25: $0.07/$0.28 per M, tools + structured outputs
+  context_window: 262144
+  supports_tools: true

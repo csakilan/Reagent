@@ -1,0 +1,21 @@
+apiVersion: reagent/v0
+kind: Connector
+metadata:
+  name: github
+  version: 1.0.0
+  description: Internal GitHub org. Custom MCP wrapper in connectors/github-mcp/ exposing exactly these actions.
+spec:
+  transport: { type: mcp, url: http://localhost:7102/mcp }
+  auth:
+    service:      { env: GITHUB_APP_TOKEN }
+    on_behalf_of: { env: GITHUB_USER_TOKEN }
+  actions:
+    - { name: pulls.read,          risk: read,        resources: [repo], description: Read a PR and its diff }
+    - { name: pulls.comment,       risk: write,       resources: [repo], description: Post a review comment }
+    - { name: pulls.merge,         risk: destructive, resources: [repo] }
+    - { name: contents.read,       risk: read,        resources: [repo] }
+    - { name: contents.write,      risk: write,       resources: [repo] }
+    - { name: issues.read,         risk: read,        resources: [repo] }
+    - { name: issues.create,       risk: write,       resources: [repo] }
+    - { name: branches.force_push, risk: destructive, resources: [repo] }
+    - { name: repos.delete,        risk: destructive, resources: [repo] }

@@ -1,0 +1,13 @@
+apiVersion: reagent/v0
+kind: Connector
+metadata:
+  name: memory
+  version: 1.0.0
+  description: Built-in memory buckets (semantic, episodic, procedural) stored in Tiger Data with pgvector.
+spec:
+  transport: { type: mcp, url: http://localhost:7100/mcp }
+  auth: { none: true }
+  actions:
+    - { name: read,   risk: read,  resources: [bucket] }
+    - { name: search, risk: read,  resources: [bucket] }
+    - { name: write,  risk: write, resources: [bucket] }

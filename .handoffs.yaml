@@ -1,0 +1,161 @@
+# ReAgent integration handoffs
+# ---------------------------------------------------------------------------
+# This file is the kitchen pass. It lives on `main` and ONLY on `main`.
+# Every workflow branch reads it with `python scripts/handoff.py status`,
+# which fetches origin/main rather than trusting the local checkout.
+#
+# A handoff is TWO stops, one on each side:
+#   * the CONSUMER's brief says  STOP: wait on <id>      -> `handoff.py wait <id>`
+#   * the PRODUCER's brief says  RELEASE: <id>           -> `handoff.py ready <id>`
+#
+# Every handoff has a deadline and a fallback. A stop that cannot time out is a
+# deadlock, and a deadlock at 05:00 costs the demo. Past the deadline the
+# consumer STOPS WAITING and keeps the fake permanently. That decision is made
+# here, in advance, not argued about at the time.
+# ---------------------------------------------------------------------------
+version: 1
+
+schedule:
+  now_when_written: "2026-10-25T02:05:00-05:00"
+  code_freeze:      "2026-10-25T10:30:00-05:00"
+  final_submission: "2026-10-25T11:30:00-05:00"
+
+workflows:
+  wf/runtime:    { owner: "A", rows: [3, 4, 5],   title: "LangChain runtime, guardrails, sub-agents" }
+  wf/resolver:   { owner: "B", rows: [1, 2, 6],   title: "Validator, resolver, evals, publish pipeline, CLI" }
+  wf/dashboard:  { owner: "C", rows: [8],         title: "Next.js dashboard, all screens" }
+  wf/data:       { owner: "D", rows: [7, 9, 10],  title: "Postgres, MCP wrappers, GitHub/Slack apps, seed" }
+
+handoffs:
+
+  - id: H0
+    title: "Contracts and fakes frozen on main"
+    producer: main
+    consumers: [wf/runtime, wf/resolver, wf/dashboard, wf/data]
+    done_when: >
+      contracts/ holds resolved_spec.schema.json, openapi.yaml, db/001_init.sql,
+      run_events.schema.json, connector_actions.json and errors.py; fakes/ and
+      fixtures/ are populated; tests/contract/ runs and reports every seam.
+    verify: "pytest tests/contract/test_contracts_selfcheck.py -q"
+    status: pending
+    deadline: "2026-10-25T03:00:00-05:00"
+    fallback: "NONE. This blocks all four workflows. If it slips, wake a human."
+
+  - id: H4
+    title: "Database live, migrated and seeded"
+    producer: wf/data
+    consumers: [wf/runtime, wf/resolver, wf/dashboard, wf/data]
+    done_when: >
+      A reachable Postgres (Tiger Cloud, else the Compose container) has
+      001_init.sql applied and the seed script loaded: enterprise row, 3 teams,
+      4 connectors, 4 models, 6+ agents with versions, and seeded run history.
+    verify: "pytest tests/contract/test_db_schema.py -q"
+    status: pending
+    deadline: "2026-10-25T03:30:00-05:00"
+    fallback: "Local Postgres in docker-compose running the same migration. Cloud becomes a connection-string swap."
+
+  - id: H1
+    title: "Resolver returns a real resolved spec"
+    producer: wf/resolver
+    consumers: [wf/runtime, wf/dashboard]
+    done_when: >
+      GET /v0/agents/{name}/resolved returns a document that validates against
+      contracts/resolved_spec.schema.json for BOTH pr-reviewer and people-ops-bot,
+      with every value carrying its source layer, and a widening attempt returns
+      a typed error from contracts/errors.py naming the field and blocking layer.
+    verify: "pytest tests/contract/test_resolver_output.py -q"
+    status: pending
+    deadline: "2026-10-25T05:00:00-05:00"
+    fallback: "fakes/resolver.py keeps serving the golden resolved specs. Demo step 4 (rules hold) is then at risk; escalate rather than silently fall back."
+
+  - id: H2
+    title: "A run executes end to end and is recorded"
+    producer: wf/runtime
+    consumers: [wf/resolver, wf/dashboard]
+    done_when: >
+      POST /v0/agents/{name}/runs builds a LangChain agent from a resolved spec,
+      executes against the fake connectors, enforces step/timeout/budget limits,
+      and writes one runs row plus ordered run_events rows that validate against
+      contracts/run_events.schema.json.
+    verify: "pytest tests/contract/test_run_lifecycle.py -q"
+    status: pending
+    deadline: "2026-10-25T06:30:00-05:00"
+    fallback: "fixtures/traces/*.json for the dashboard; the eval engine grades recorded traces instead of live runs."
+
+  - id: H3
+    title: "Live GitHub connector wrapper"
+    producer: wf/data
+    consumers: [wf/runtime]
+    done_when: >
+      The GitHub MCP wrapper serves exactly the action names in
+      contracts/connector_actions.json on :7102, with the token injected at the
+      wrapper and never in model context, against the test repo holding the
+      planted AWS key.
+    verify: "pytest tests/contract/test_connector_actions.py -q"
+    status: pending
+    deadline: "2026-10-25T07:00:00-05:00"
+    fallback: "HARD FALLBACK. Past 07:00 wf/runtime stays on fakes/github_wrapper.py permanently. Live GitHub moves to integ/all only, and demo step 6 uses the pre-recorded video."
+
+  - id: H5
+    title: "Eval engine returns a real report"
+    producer: wf/resolver
+    consumers: [wf/dashboard]
+    done_when: >
+      POST /v0/agents/{name}/evals returns a report with pass rate, Wilson 95%
+      interval, pass^k, recall, false-alarm rate, safety pass rate, avg cost and
+      p95 latency, and GET /v0/publish-runs/{id} returns all 7 stage results.
+    verify: "pytest tests/contract/test_eval_report.py -q"
+    status: pending
+    deadline: "2026-10-25T07:30:00-05:00"
+    fallback: "fixtures/eval_report.json and fixtures/publish_run.json. Publish screens render seeded data."
+
+  - id: H6
+    title: "A paused write action lands in the approvals queue"
+    producer: wf/runtime
+    consumers: [wf/dashboard]
+    done_when: >
+      A write-risk action on an agent with require_for_risk pauses the run,
+      writes an approvals row, and resumes to completion after
+      POST /v0/approvals/{id} approves it.
+    verify: "pytest tests/contract/test_approval_pause_resume.py -q"
+    status: pending
+    deadline: "2026-10-25T08:00:00-05:00"
+    fallback: "fixtures/approvals.json. The queue screen renders seeded rows and approval is demoed as a state change only."
+
+# ---------------------------------------------------------------------------
+# Integration locks
+# ---------------------------------------------------------------------------
+# A lock is the other stop you asked for: it freezes merges from the named
+# workflows while two of them are tested together on a shared branch.
+# Hold one with:    python scripts/handoff.py lock integ/resolver+runtime --owner A
+# Release it with:  python scripts/handoff.py unlock integ/resolver+runtime
+# CI fails any push to a frozen wf/** branch and prints the reason.
+
+locks:
+  - branch: integ/resolver+runtime
+    freezes: [wf/resolver, wf/runtime]
+    tests: [H1, H2]
+    status: open
+    owner: ""
+    reason: ""
+
+  - branch: integ/runtime+data
+    freezes: [wf/runtime, wf/data]
+    tests: [H3, H4]
+    status: open
+    owner: ""
+    reason: ""
+
+  - branch: integ/dashboard+api
+    freezes: [wf/dashboard]
+    tests: [H1, H5, H6]
+    status: open
+    owner: ""
+    reason: ""
+
+  - branch: integ/all
+    freezes: [wf/runtime, wf/resolver, wf/dashboard, wf/data]
+    tests: [H0, H1, H2, H3, H4, H5, H6]
+    status: open
+    owner: ""
+    reason: ""

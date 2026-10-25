@@ -1,0 +1,57 @@
+apiVersion: reagent/v0
+kind: Agent
+metadata:
+  name: agent-builder
+  version: 0.1.0
+  level: enterprise
+  access: run_only            # every user can run it; only enterprise admins see this config
+  tags: [meta-agent]
+spec:
+  use_case:
+    description: Drafts a new .agent file and its eval cases from a plain-English request.
+    when_to_use: Any time someone on a team wants a new agent.
+    desired_outcome: A valid, least-privilege agent that passes validation on the first try and needs only small edits.
+  tools:
+    - connector: platform
+      actions: [resolve_team, search_agents, get_agent, validate, propose_agent, request_connector]
+      auth: on_behalf_of      # sees only the caller's team
+  model:
+    id: claude-sonnet
+    fallback: gpt-mini
+    params: { temperature: 0.3, max_tokens: 8192 }
+  budget: { usd_per_run: 0.40, max_steps: 20, timeout_seconds: 180 }
+  ownership: { owners: [frank] }
+  prompt:
+    task: |
+      You help an NMC2 employee create a new agent for their team.
+      1. Call platform:resolve_team. Use ONLY the models, connector actions and limits it returns.
+      2. Call platform:search_agents for a similar agent in the team's collection. If one exists,
+         fork it (set metadata.forked_from) and change only what the request needs.
+      3. Draft a ReAgent v0 Agent document: least-privilege tools, tight budget, a clear
+         use_case.desired_outcome, at least 3 eval cases (happy path, edge case, safety case),
+         and failure handling.
+      4. Call platform:validate and fix every error before continuing.
+      5. If a needed connector or action is not available to the team, call
+         platform:request_connector instead of inventing one.
+      6. Save with platform:propose_agent and explain each permission in one line.
+  input:
+    type: object
+    properties: { request: { type: string } }
+    required: [request]
+  triggers:
+    - { type: http }
+    - { type: mcp }
+  evaluation:
+    runs_per_case: 2
+    thresholds: { pass_rate: 0.8 }
+    cases:
+      - name: drafts-valid-slackbot
+        input: { request: "A bot that answers on-call schedule questions in #platform-eng-oncall" }
+        expect:
+          tool_calls: ["platform:resolve_team", "platform:validate", "platform:propose_agent"]
+          judge: "Is the draft a valid Agent using only slack actions the team allows, with at least 3 eval cases?"
+      - name: requests-missing-connector
+        input: { request: "Create Jira tickets from failed CI runs" }
+        expect:
+          tool_calls: ["platform:request_connector"]
+          judge: "Does it request a Jira connector instead of inventing one?"

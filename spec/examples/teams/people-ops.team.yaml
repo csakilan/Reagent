@@ -1,0 +1,23 @@
+apiVersion: reagent/v0
+kind: Team
+metadata:
+  name: people-ops
+  description: People Operations (placeholder team name). No GitHub access at all.
+spec:
+  members: [dana, eli]
+  approvers: [dana]
+  prompt: "Answer from the employee handbook. Escalate compensation, performance and HR-case questions to a human."
+  models:
+    allow: [claude-sonnet, gpt-mini, gpt-oss]
+  connectors:
+    slack:
+      allow: ["messages.*", reactions.add, users.read, channels.list]
+      resources: { channel: ["#ask-people-ops", "#announcements", "#people-ops-internal"] }
+    memory:
+      allow: ["*"]
+  limits:
+    usd_per_month: 50
+    max_concurrent_runs: 10
+  memory:
+    buckets:
+      - { name: people-ops-faq, type: semantic, read: [people-ops], write: [people-ops] }

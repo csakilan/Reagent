@@ -1,0 +1,53 @@
+apiVersion: reagent/v0
+kind: Agent
+metadata:
+  name: failure-triage
+  version: 0.1.0
+  level: enterprise
+  access: run_only
+  tags: [meta-agent, observability]
+spec:
+  use_case:
+    description: Groups an agent's failed and denied runs by cause, explains each group, and proposes a fix.
+    when_to_use: When an alert fires, when production task success drops, or on demand.
+    desired_outcome: Every recurring failure has a named cause and a concrete proposed fix within minutes.
+  tools:
+    - connector: platform
+      actions: [get_agent, get_runs, propose_agent]
+      auth: on_behalf_of
+  model:
+    id: claude-sonnet
+    params: { temperature: 0 }
+  budget: { usd_per_run: 0.40, max_steps: 25, timeout_seconds: 300 }
+  ownership: { owners: [frank] }
+  prompt:
+    task: |
+      Fetch the agent's failed, denied and low-graded runs from the given time window (platform:get_runs).
+      Group them by cause: connector error, budget or step cutoff, permission denial, timeout,
+      judge failure, or bad output. For each group give the count, one representative trace ID,
+      the likely root cause, and a fix: a spec change (via platform:propose_agent) or a new eval
+      case that would have caught it. Never quote secrets from traces.
+  input:
+    type: object
+    properties:
+      agent: { type: string }
+      window_hours: { type: integer }
+    required: [agent]
+  triggers:
+    - { type: http }
+    - { type: agent }
+  evaluation:
+    runs_per_case: 3
+    thresholds: { pass_rate: 0.85 }
+    cases:
+      - name: groups-permission-denials
+        kind: positive
+        input: { agent: fixture, window_hours: 24 }
+        mocks:
+          "platform:get_runs": { runs: [
+            { id: r1, status: failed, error: "denied: github:pulls.merge" },
+            { id: r2, status: failed, error: "denied: github:pulls.merge" },
+            { id: r3, status: failed, error: "timeout after 240s" } ] }
+        expect:
+          output_contains: ["pulls.merge", "timeout"]
+          reference: "Two runs were denied github:pulls.merge (the prompt asks for merges the team isn't granted); one run timed out."

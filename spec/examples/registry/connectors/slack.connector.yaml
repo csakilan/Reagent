@@ -1,0 +1,21 @@
+apiVersion: reagent/v0
+kind: Connector
+metadata:
+  name: slack
+  version: 1.0.0
+  description: Company Slack workspace. Registered once, as broad as possible; teams get subsets. Custom MCP wrapper in connectors/slack-mcp/.
+spec:
+  transport: { type: mcp, url: http://localhost:7101/mcp }
+  auth:
+    service:      { env: SLACK_BOT_TOKEN }     # the bot's own login
+    on_behalf_of: { env: SLACK_USER_TOKEN }    # the triggering user's login, filled per run
+  actions:
+    - { name: channels.list,    risk: read }
+    - { name: channels.archive, risk: destructive, resources: [channel] }
+    - { name: messages.read,    risk: read,  resources: [channel] }
+    - { name: messages.search,  risk: read,  resources: [channel] }
+    - { name: messages.post,    risk: write, resources: [channel] }
+    - { name: reactions.add,    risk: write, resources: [channel] }
+    - { name: users.read,       risk: read }
+    - { name: dm.read,          risk: read }
+    - { name: dm.send,          risk: write }

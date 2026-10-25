@@ -1,0 +1,30 @@
+# Line endings are pinned so the 1 macOS and 3 Windows clones agree.
+# Without this, Windows checkouts rewrite every file to CRLF and `git status`
+# shows the whole tree as modified, which costs an hour to diagnose at 4 AM.
+* text=auto eol=lf
+
+*.py    text eol=lf
+*.sh    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.json  text eol=lf
+*.sql   text eol=lf
+*.md    text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.css   text eol=lf
+*.agent text eol=lf
+
+# Windows-native files keep CRLF.
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.woff2 binary
+
+# Keep the generated API client out of diff review noise.
+dashboard/lib/api.generated.ts linguist-generated=true -diff

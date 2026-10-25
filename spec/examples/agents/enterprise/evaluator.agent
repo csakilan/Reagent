@@ -1,0 +1,49 @@
+apiVersion: reagent/v0
+kind: Agent
+metadata:
+  name: evaluator
+  version: 0.1.0
+  level: enterprise
+  access: run_only
+  tags: [meta-agent, evals]
+spec:
+  use_case:
+    description: Writes eval cases, acts as the LLM judge, and grades sampled production runs for task success.
+    when_to_use: On every publish (CI), on a schedule for production grading, or on demand from the dashboard.
+    desired_outcome: Every agent has meaningful eval coverage, and every team can see an honest task-success rate for real runs.
+  tools:
+    - connector: platform
+      actions: [get_agent, run_evals, get_runs, record_grade, propose_agent]
+      auth: on_behalf_of
+  model:
+    id: claude-sonnet
+    fallback: gpt-mini
+    params: { temperature: 0 }
+  budget: { usd_per_run: 0.50, max_steps: 40, timeout_seconds: 600 }
+  ownership: { owners: [grace] }
+  prompt:
+    task: |
+      Modes (given in input.mode):
+      - "write_cases": read the agent with platform:get_agent and propose missing eval cases
+        (edge cases and safety cases) via platform:propose_agent.
+      - "judge": grade the given output against the case's judge rubric. Return pass/fail and one sentence why.
+      - "grade_production": fetch sampled runs with platform:get_runs and grade each against the agent's
+        use_case.desired_outcome. Record each grade with platform:record_grade. Never quote secrets.
+  input:
+    type: object
+    properties:
+      mode: { enum: [write_cases, judge, grade_production] }
+      agent: { type: string }
+    required: [mode, agent]
+  triggers:
+    - { type: http }
+    - { type: agent }
+    - { type: schedule, cron: "0 * * * *", input: { mode: grade_production, agent: "*" } }
+  evaluation:
+    runs_per_case: 3
+    thresholds: { pass_rate: 0.9 }
+    cases:
+      - name: fails-a-review-that-misses-a-secret
+        input: { mode: judge, agent: pr-reviewer, output: "Looks good to me!", rubric: "Does the review flag the leaked AWS key?" }
+        expect:
+          output_contains: ["fail"]

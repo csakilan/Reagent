@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reagent/v0/resolved",
+  "title": "ReAgent resolved spec — FROZEN CONTRACT",
+  "description": "The resolver's output. SPEC.md §1 defines this in one sentence ('the merged result, with each value tagged by the layer it came from') and three workflows consume it, so the shape is fixed here. Produced by wf/resolver. Consumed by wf/runtime (via `effective`) and wf/dashboard (via `provenance`). Served at GET /v0/agents/{name}/resolved.\n\nTWO VIEWS, ONE DOCUMENT. `provenance` is the merged tree with every leaf tagged by source layer, for the blame-gutter UI. `effective` is the same information flattened, for the runtime to build tools and enforce limits without walking a tree. A resolver MUST emit both and they MUST agree.\n\nVISIBILITY. SPEC.md §2 says members never see the enterprise layer, yet the merged result contains enterprise prompt text and limits. Frozen rule: when `caller.is_enterprise_admin` is false, every leaf whose source is `enterprise` has its `value` replaced by null and `redacted` set to true. The source tag is kept, so the UI can still show that a value came from above without revealing it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["agent", "version", "level", "resolved_at", "layers", "caller", "provenance", "effective", "rejections"],
+  "properties": {
+    "agent":   { "type": "string" },
+    "version": { "type": "string" },
+    "level":   { "enum": ["team", "enterprise"] },
+    "team":    { "type": ["string", "null"], "description": "Required when level is team." },
+    "access":  { "enum": ["private", "run_only", "service", null] },
+    "resolved_at": { "type": "string", "format": "date-time" },
+
+    "layers": {
+      "type": "array",
+      "description": "The layers merged, in order, outermost first. Exactly ['enterprise','team:<name>','agent'] for a team agent, ['enterprise','agent'] for an enterprise agent.",
+      "items": { "$ref": "#/$defs/layerName" },
+      "minItems": 2
+    },
+
+    "caller": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["user", "team", "is_enterprise_admin"],
+      "description": "The AUTHENTICATED principal, from the session token. Audit finding 2: never from a request body field.",
+      "properties": {
+        "user":  { "type": ["string", "null"] },
+        "team":  { "type": ["string", "null"], "description": "The team a meta-agent run is scoped to." },
+        "is_enterprise_admin": { "type": "boolean" }
+      }
+    },
+
+    "provenance": {
+      "type": "object",
+      "description": "The merged spec, every leaf tagged. For the dashboard's resolved view.",
+      "additionalProperties": false,
+      "properties": {
+        "use_case": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/leaf" }
+        },
+        "prompt": {
+          "type": "array",
+          "description": "Ordered parts, enterprise then team then agent task. Audit finding 21: assembled as ONE system message, parts joined by '\\n\\n', each .strip()ed. Run input is always a separate user message, never concatenated here.",
+          "items": { "$ref": "#/$defs/leaf" }
+        },
+        "tools": {
+          "type": "array",
+          "description": "The COMPLETE allowlist after intersection, including synthetic entries expanded from `memory` (audit finding 12). Tagged per element.",
+          "items": { "$ref": "#/$defs/toolLeaf" }
+        },
+        "model":       { "type": "object", "additionalProperties": { "$ref": "#/$defs/leaf" } },
+        "budget":      { "type": "object", "additionalProperties": { "$ref": "#/$defs/leaf" } },
+        "limits":      { "type": "object", "additionalProperties": { "$ref": "#/$defs/leaf" } },
+        "triggers":    { "type": "array",  "items": { "$ref": "#/$defs/leaf" } },
+        "guardrails":  { "type": "object" },
+        "memory":      { "type": "array",  "items": { "$ref": "#/$defs/leaf" } },
+        "sub_agents":  { "type": "array",  "items": { "$ref": "#/$defs/leaf" } },
+        "observability": { "type": "object" },
+        "failure":     { "type": "object", "additionalProperties": { "$ref": "#/$defs/leaf" } },
+        "evaluation":  { "type": "object" },
+        "ownership":   { "type": "object" },
+        "input":       { "$ref": "#/$defs/leaf" },
+        "output":      { "$ref": "#/$defs/leaf" },
+        "locked": {
+          "type": "array",
+          "description": "Union of locked prefixes from every layer above. Audit finding 5: these are dot paths interpreted as PREFIX locks; a lower layer setting that path or any descendant fails resolution.",
+          "items": { "$ref": "#/$defs/leaf" }
+        }
+      }
+    },
+
+    "effective": {
+      "type": "object",
+      "description": "The same result, flattened. For the runtime. No provenance here on purpose: this is the enforcement surface, and tagging would invite reading the tag instead of the value.",
+      "additionalProperties": false,
+      "required": ["tool_permissions", "denylist", "limits", "model", "guardrails"],
+      "properties": {
+        "tool_permissions": {
+          "type": "array",
+          "description": "Exactly what the agent may call. The runtime builds its LangChain tool list from this and NOTHING else.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["permission", "connector", "action", "mcp_tool", "auth", "risk", "requires_approval"],
+            "properties": {
+              "permission": { "type": "string", "pattern": "^[a-z0-9-]+:[a-z0-9._-]+$", "description": "Internal format, e.g. github:pulls.comment." },
+              "connector":  { "type": "string" },
+              "action":     { "type": "string" },
+              "mcp_tool":   {
+                "type": "string",
+                "pattern": "^[a-z0-9_-]{1,64}$",
+                "description": "The WIRE name on the MCP server. Dots are ILLEGAL in MCP tool names (pattern ^[a-zA-Z0-9_-]{1,64}$) and Claude Code silently rewrites them to underscore. Read this value; never recompute the transform. See contracts/connector_actions.json."
+              },
+              "resources":  { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
+              "auth":       { "enum": ["service", "on_behalf_of"] },
+              "risk":       { "enum": ["read", "write", "destructive"] },
+              "requires_approval": { "type": "boolean", "description": "Already computed from the union of every layer's approval rules. The runtime does not re-derive it." }
+            }
+          }
+        },
+        "denylist": {
+          "type": "array",
+          "description": "Audit finding 13: connectors.<name>.deny holds bare globs and guardrails.deny holds qualified strings. Both are normalised to qualified globs and unioned across all three layers here. Deny always beats allow.",
+          "items": { "type": "string" }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["usd_per_run", "max_steps", "timeout_seconds", "max_call_depth"],
+          "description": "PER-RUN limits only, resolved by minimum. Audit finding 7: usd_per_month and max_concurrent_runs are AGGREGATE limits enforced per layer against the runs table, not per-run minimums, so they are deliberately absent here.",
+          "properties": {
+            "usd_per_run":     { "type": "number", "exclusiveMinimum": 0 },
+            "max_steps":       { "type": "integer", "minimum": 1 },
+            "timeout_seconds": { "type": "integer", "minimum": 1 },
+            "max_call_depth":  { "type": "integer", "minimum": 0 }
+          }
+        },
+        "aggregate_limits": {
+          "type": "object",
+          "description": "Checked before a run starts, by summing the runs table at each layer independently. A run is refused when ANY layer's aggregate is exhausted.",
+          "additionalProperties": false,
+          "properties": {
+            "enterprise": { "$ref": "#/$defs/aggregateLimit" },
+            "team":       { "$ref": "#/$defs/aggregateLimit" },
+            "agent":      { "$ref": "#/$defs/aggregateLimit" }
+          }
+        },
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "openrouter_model"],
+          "properties": {
+            "id":               { "type": "string", "description": "Registry Model name." },
+            "openrouter_model": { "type": "string", "description": "Resolved OpenRouter ID, e.g. anthropic/claude-sonnet-5.5." },
+            "fallback":         { "type": ["string", "null"] },
+            "fallback_openrouter_model": { "type": ["string", "null"] },
+            "params":           { "type": "object" }
+          }
+        },
+        "guardrails": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["redaction", "audit_log"],
+          "description": "Stricter-wins. A flag that is on above cannot be turned off below.",
+          "properties": {
+            "redaction": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "secrets": { "type": "boolean" },
+                "pii":     { "type": "boolean" }
+              }
+            },
+            "audit_log":        { "type": "boolean" },
+            "trace_payloads":   { "enum": ["redacted", "metadata_only"] },
+            "approval_timeout_minutes": { "type": ["integer", "null"], "description": "Audit finding 16: on expiry the action is DENIED and the run fails with APPROVAL_EXPIRED." }
+          }
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The single assembled system message. Parts joined by '\\n\\n', each stripped, in order enterprise, team, agent."
+        },
+        "sub_agents": {
+          "type": "array",
+          "description": "Audit finding 24: ranges like @^1 are resolved ONCE at publish and stored exact, so an immutable version cannot change behaviour when a dependency publishes.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "version"],
+            "properties": {
+              "name":    { "type": "string" },
+              "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
+            }
+          }
+        },
+        "triggers": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+
+    "rejections": {
+      "type": "array",
+      "description": "Empty when resolution succeeded. Non-empty means the agent CANNOT RUN. SPEC.md §1 requires an error naming the field and the layer that blocked it, and demo step 4 shows exactly this, so the text is part of the contract. Codes are defined in contracts/errors.py.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "field", "blocked_by", "message"],
+        "properties": {
+          "code":       { "type": "string", "pattern": "^E_[A-Z_]+$" },
+          "field":      { "type": "string", "description": "Dot path, e.g. spec.budget.timeout_seconds." },
+          "blocked_by": { "$ref": "#/$defs/layerName" },
+          "attempted":  {},
+          "allowed":    {},
+          "message":    { "type": "string", "description": "Human-readable, shown verbatim in the dashboard and the CLI." }
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "layerName": {
+      "type": "string",
+      "pattern": "^(enterprise|agent|default|team:[a-z0-9-]+)$"
+    },
+    "leaf": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "source"],
+      "properties": {
+        "value":    { "description": "Null when redacted is true." },
+        "source":   { "$ref": "#/$defs/layerName" },
+        "redacted": { "type": "boolean", "description": "True when the caller is not an enterprise admin and the source is enterprise. The value is null; the source tag remains." },
+        "narrowed_from": { "description": "Optional. What the parent layer allowed, when a lower layer tightened it. Lets the UI show 'team narrowed this from X'." }
+      }
+    },
+    "toolLeaf": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "source"],
+      "properties": {
+        "value": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["connector", "actions"],
+          "properties": {
+            "connector": { "type": "string" },
+            "actions":   { "type": "array", "items": { "type": "string" } },
+            "resources": { "type": "object" },
+            "auth":      { "enum": ["service", "on_behalf_of"] },
+            "synthetic": { "type": "boolean", "description": "True for entries the resolver expanded from `memory`, which the .agent file does not list. Audit finding 12." }
+          }
+        },
+        "source":   { "$ref": "#/$defs/layerName" },
+        "redacted": { "type": "boolean" },
+        "narrowed_from": {}
+      }
+    },
+    "aggregateLimit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "usd_per_month":       { "type": ["number", "null"] },
+        "usd_spent_this_month":{ "type": ["number", "null"] },
+        "max_concurrent_runs": { "type": ["integer", "null"] },
+        "current_concurrent":  { "type": ["integer", "null"] }
+      }
+    }
+  }
+}

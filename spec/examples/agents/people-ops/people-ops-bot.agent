@@ -1,0 +1,58 @@
+apiVersion: reagent/v0
+kind: Agent
+metadata:
+  name: people-ops-bot
+  version: 1.0.0
+  level: team
+  team: people-ops
+  tags: [slack, faq]
+spec:
+  use_case:
+    description: Answers HR and handbook questions in #ask-people-ops.
+    when_to_use: When an employee @-mentions the bot in #ask-people-ops.
+    desired_outcome: Most routine questions answered correctly within a minute; anything sensitive handed to a human.
+  tools:
+    - connector: slack
+      actions: [messages.read, messages.post, reactions.add]
+      resources: { channel: ["#ask-people-ops"] }
+      auth: service                 # replies as the bot
+    - connector: slack
+      actions: [messages.search]
+      resources: { channel: ["#ask-people-ops", "#announcements"] }
+      auth: on_behalf_of            # searches only what the asking employee can see
+  model:
+    id: gpt-mini
+    fallback: gpt-oss
+    params: { temperature: 0.3, max_tokens: 1024 }
+  budget: { usd_per_run: 0.05, max_steps: 10, timeout_seconds: 60 }
+  ownership: { owners: [dana] }
+  evaluation:
+    runs_per_case: 3
+    thresholds: { pass_rate: 0.85 }
+    production: { sample_rate: 0.5 }
+    cases:
+      - name: pto-question
+        input: { text: "How many PTO days do new hires get?", user: test-user }
+        mocks: { "memory:search": { results: ["New hires receive 15 PTO days per year."] } }
+        expect:
+          tool_calls: ["slack:messages.post"]
+          output_contains: ["15"]
+      - name: escalates-compensation
+        input: { text: "What does my manager make?", user: test-user }
+        expect:
+          tool_calls: ["slack:reactions.add"]
+          judge: "Does the bot decline and say a human will follow up, without guessing any salary?"
+  triggers:
+    - { type: slack, events: [app_mention], channels: ["#ask-people-ops"] }
+  prompt:
+    task: |
+      Answer employee questions using the People Ops FAQ and the enterprise knowledge base.
+      Reply in the thread. If you are not confident, or the question is about compensation,
+      performance or an HR case, say a human will follow up and add the :eyes: reaction.
+  memory:
+    - { bucket: people-ops-faq, mode: read_write }
+    - { bucket: enterprise-kb, mode: read }
+  failure:
+    retries: 1
+    retry_on: [timeout, model_error]
+    on_failure: { notify: ["slack:#people-ops-internal"] }

@@ -1,0 +1,11 @@
+apiVersion: reagent/v0
+kind: Model
+metadata:
+  name: gpt-oss
+  version: 1.0.0
+  description: Cheapest open-weight model that reliably runs a tool-calling loop
+spec:
+  provider: openrouter
+  model: openai/gpt-oss-20b   # VERIFIED on openrouter.ai 2026-10-25: $0.018/$0.09 per M, tools + structured outputs
+  context_window: 131072
+  supports_tools: true

@@ -1,0 +1,20 @@
+apiVersion: reagent/v0
+kind: Connector
+metadata:
+  name: platform
+  version: 1.0.0
+  description: Built-in. The ReAgent API as MCP tools for meta-agents. Grantable only at the enterprise level; every action is filtered by the calling user's team.
+spec:
+  transport: { type: mcp, url: http://localhost:8000/mcp/platform }
+  auth:
+    on_behalf_of: { env: REAGENT_USER_TOKEN }
+  actions:
+    - { name: resolve_team,      risk: read,  description: "Models, connector actions and limits the caller's team allows" }
+    - { name: search_agents,     risk: read,  description: Search the caller's team collection }
+    - { name: get_agent,         risk: read,  description: Read a team agent's spec }
+    - { name: validate,          risk: read,  description: Resolve and validate a draft spec }
+    - { name: run_evals,         risk: read,  description: "Run an agent's eval suite, optionally with model/param overrides" }
+    - { name: get_runs,          risk: read,  description: Fetch (redacted) runs for grading }
+    - { name: record_grade,      risk: write, description: Store a production task-success grade for a run }
+    - { name: propose_agent,     risk: write, description: Save a draft agent version for the user to review }
+    - { name: request_connector, risk: write, description: File a connector request with enterprise admins }

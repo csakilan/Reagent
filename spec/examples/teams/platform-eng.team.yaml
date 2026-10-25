@@ -1,0 +1,30 @@
+apiVersion: reagent/v0
+kind: Team
+metadata:
+  name: platform-eng
+  description: Platform Engineering (placeholder team name). Layer set by enterprise admins.
+spec:
+  members: [alice, bob, carol]
+  approvers: [alice]
+  prompt: "We write Go and Terraform. Prefer small changes, cite file and line, never suggest disabling tests. Follow docs/style-guide.md."
+  models:
+    allow: [qwen-coder, claude-sonnet, gpt-mini]
+  connectors:
+    github:
+      allow: ["pulls.*", "issues.*", contents.read]
+      resources: { repo: ["nmc2/infra", "nmc2/platform-api"] }
+    slack:
+      allow: [messages.post]
+      resources: { channel: ["#platform-eng*"] }
+    memory:
+      allow: ["*"]
+  guardrails:
+    approval: { require_for_risk: [write, destructive] }
+  limits:
+    usd_per_month: 200
+    max_concurrent_runs: 5
+  memory:
+    buckets:
+      - { name: platform-eng-notes, type: semantic, read: [platform-eng], write: [platform-eng] }
+      - { name: platform-eng-runbooks, type: procedural, read: [platform-eng], write: [platform-eng] }
+      - { name: platform-eng-history, type: episodic, read: [platform-eng] }

@@ -1,0 +1,36 @@
+apiVersion: reagent/v0
+kind: Agent
+metadata:
+  name: cost-optimizer
+  version: 0.1.0
+  level: enterprise
+  access: run_only
+  tags: [meta-agent, cost]
+spec:
+  use_case:
+    description: Reruns an agent's evals across model and parameter combinations and recommends the cheapest setup that still passes.
+    when_to_use: Before publishing, or when a team's spend is close to budget.
+    desired_outcome: Teams pay the least possible per run without dropping below their eval thresholds.
+  tools:
+    - connector: platform
+      actions: [resolve_team, get_agent, run_evals, propose_agent]
+      auth: on_behalf_of
+  model:
+    id: gpt-mini
+    params: { temperature: 0 }
+  budget: { usd_per_run: 1.50, max_steps: 30, timeout_seconds: 900 }
+  ownership: { owners: [frank] }
+  prompt:
+    task: |
+      1. Get the agent and the models its team allows (platform:resolve_team).
+      2. Build a grid of at most 8 variants: allowed models x temperature {0, 0.3} x max_tokens {current, half}.
+      3. Run platform:run_evals for each variant. Each result reports pass rate, average cost and p95 latency.
+      4. Recommend the cheapest variant that meets every threshold. Show a table of all variants.
+      5. Offer the winner as a draft via platform:propose_agent. Never publish directly.
+  input:
+    type: object
+    properties: { agent: { type: string } }
+    required: [agent]
+  triggers:
+    - { type: http }
+    - { type: mcp }

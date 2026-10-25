@@ -1,0 +1,43 @@
+apiVersion: reagent/v0
+kind: Agent
+metadata:
+  name: code-reviewer
+  version: 1.2.0
+  level: team
+  team: platform-eng
+  tags: [code-review, github]
+spec:
+  use_case:
+    description: General pull request reviewer for Platform Eng repos.
+    when_to_use: Ad hoc review of any PR in the team's repos.
+    desired_outcome: Reviews that catch real bugs and security issues with few false alarms.
+  tools:
+    - connector: github
+      actions: [pulls.read]
+      resources: { repo: ["nmc2/platform-api"] }
+      auth: on_behalf_of
+  model:
+    id: claude-sonnet
+    params: { temperature: 0.2, max_tokens: 4096 }
+  budget: { usd_per_run: 0.50, max_steps: 30, timeout_seconds: 300 }
+  ownership: { owners: [bob] }
+  prompt:
+    task: |
+      Read the PR with github:pulls.read. Report bugs, security issues and style problems.
+      Be specific: file, line, why, and a suggested fix.
+  input:
+    type: object
+    properties: { repo: { type: string }, pr_number: { type: integer } }
+    required: [repo, pr_number]
+  triggers:
+    - { type: http }
+    - { type: mcp }
+  evaluation:
+    runs_per_case: 3
+    thresholds: { pass_rate: 0.85 }
+    cases:
+      - name: clean-pr-no-false-alarm
+        input: { repo: nmc2/platform-api, pr_number: 2 }
+        mocks: { "github:pulls.read": { diff: "+// fix typo in comment\n" } }
+        expect:
+          judge: "Does the review avoid inventing serious issues for a trivial change?"

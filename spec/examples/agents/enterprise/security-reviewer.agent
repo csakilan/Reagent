@@ -1,0 +1,68 @@
+apiVersion: reagent/v0
+kind: Agent
+metadata:
+  name: security-reviewer
+  version: 0.1.0
+  level: enterprise
+  access: run_only
+  tags: [meta-agent, security]
+spec:
+  use_case:
+    description: Reviews an agent's spec for least privilege before it can be published.
+    when_to_use: Automatically on every publish, or on demand from the dashboard.
+    desired_outcome: No agent is published with permissions it doesn't need or risky actions without approval.
+  tools:
+    - connector: platform
+      actions: [resolve_team, get_agent, get_runs, propose_agent]
+      auth: on_behalf_of
+  model:
+    id: claude-sonnet
+    params: { temperature: 0 }
+  budget: { usd_per_run: 0.20, max_steps: 15, timeout_seconds: 120 }
+  ownership: { owners: [grace] }
+  prompt:
+    task: |
+      Review the agent given in input.agent. Report, with the exact spec path for each:
+      1. Tool actions that neither the task prompt nor any eval case uses, and that past runs
+         (platform:get_runs) never called. Recommend removing them.
+      2. Write or destructive actions with no approval requirement.
+      3. Resource globs broader than the prompt needs (for example repo: ["nmc2/*"]).
+      4. on_behalf_of where service would do, or the reverse.
+      5. Budgets far above what past runs actually cost.
+      Return verdict pass or needs_changes, the findings, and a narrower spec via
+      platform:propose_agent. Never approve your own proposal.
+  input:
+    type: object
+    properties: { agent: { type: string } }
+    required: [agent]
+  output:
+    type: object
+    properties:
+      verdict: { enum: [pass, needs_changes] }
+      findings: { type: array, items: { type: object, properties: { path: {type: string}, issue: {type: string}, fix: {type: string} } } }
+    required: [verdict, findings]
+  triggers:
+    - { type: http }
+    - { type: agent }
+  evaluation:
+    runs_per_case: 3
+    thresholds: { pass_rate: 0.9 }
+    cases:
+      - name: flags-unused-write-permission
+        kind: positive
+        input: { agent: over-permissioned-fixture }
+        mocks:
+          "platform:get_agent": { spec: { tools: [{ connector: github, actions: [pulls.read, pulls.comment, contents.write] }], prompt: { task: "Summarize the PR." } } }
+          "platform:get_runs": { runs: [{ tool_calls: ["github:pulls.read"] }] }
+        expect:
+          output_contains: ["contents.write", "needs_changes"]
+          reference: "contents.write and pulls.comment are never used by the prompt or past runs; remove them."
+      - name: passes-minimal-agent
+        kind: negative
+        input: { agent: minimal-fixture }
+        mocks:
+          "platform:get_agent": { spec: { tools: [{ connector: github, actions: [pulls.read] }], prompt: { task: "Summarize the PR with github:pulls.read." } } }
+          "platform:get_runs": { runs: [{ tool_calls: ["github:pulls.read"] }] }
+        expect:
+          output_contains: ["pass"]
+          output_not_contains: ["needs_changes"]
