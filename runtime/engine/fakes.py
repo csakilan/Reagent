@@ -71,7 +71,7 @@ PULLS: dict[int, dict[str, Any]] = {
 
 def _github_handler(mcp_tool: str):
     async def run(**kw: Any) -> str:
-        pr = PULLS.get(int(kw.get("pr_number", 0) or 0))
+        pr = PULLS.get(int(kw.get("pr_number") or kw.get("number") or 0))
         if mcp_tool == "pulls_read":
             if not pr:
                 return json.dumps({"error": "pull request not found"})
@@ -181,7 +181,9 @@ class FakeChatModel(BaseChatModel):
         repo, pr = inp.get("repo"), inp.get("pr_number")
         sub = next((n for n in self.bound if n.startswith("agent__")), None)
         if "github__pulls_read" in self.bound and "github__pulls_read" not in called:
-            calls = [call("github__pulls_read", {"repo": repo, "pr_number": pr})]
+            # Both spellings: the fake connector says pr_number, the real WF4
+            # wrapper's schema says number. A live model reads the schema.
+            calls = [call("github__pulls_read", {"repo": repo, "pr_number": pr, "number": pr})]
             if "merge" in json.dumps(inp).lower() and "github__pulls_merge" not in called:
                 # A naive model obeys the request. The guardrail must stop it.
                 calls.append(call("github__pulls_merge", {"repo": repo, "pr_number": pr}))
@@ -192,7 +194,8 @@ class FakeChatModel(BaseChatModel):
         if "github__pulls_comment" in self.bound and "github__pulls_comment" not in called:
             body = self._review(results, sub)
             return AIMessage(content="", tool_calls=[
-                call("github__pulls_comment", {"repo": repo, "pr_number": pr, "body": body})])
+                call("github__pulls_comment", {"repo": repo, "pr_number": pr, "number": pr,
+                                               "body": body})])
         return AIMessage(content=self._review(results, sub) +
                          ("\n\nPosted the review to the pull request."
                           if "github__pulls_comment" in results else ""))

@@ -36,6 +36,7 @@ class ParentCtx:
     root_team: str | None
     user: str | None
     chain: tuple[str, ...] = ()
+    connector_headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -53,6 +54,7 @@ class RunCtx:
     user: str | None
     chain: tuple[str, ...]
     parent_span_id: str | None = None
+    connector_headers: dict[str, str] = field(default_factory=dict)  # root run's, never per child
     spent_usd: float = 0.0            # own model cost so far, updated by the budget hook
     child_cost_usd: float = 0.0
     steps: int = 0
@@ -69,7 +71,8 @@ class RunCtx:
             remaining_usd=self.remaining_usd(),
             remaining_steps=None if self.limit_steps is None else max(1, self.limit_steps - self.steps),
             deadline=self.deadline, root_permissions=self.root_permissions,
-            root_team=self.root_team, user=self.user, chain=self.chain)
+            root_team=self.root_team, user=self.user, chain=self.chain,
+            connector_headers=dict(self.connector_headers))
 
 
 def make_agent_tools(sub_agents: list[dict[str, Any]], ctx: RunCtx, recorder: Any) -> list[StructuredTool]:

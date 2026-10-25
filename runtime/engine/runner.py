@@ -164,7 +164,7 @@ async def _build(spec: dict[str, Any], recorder: Recorder, ctx: RunCtx, checkpoi
     if prompt is None:
         raise ReAgentError(Rejection(Code.SCHEMA_INVALID, field="effective.prompt",
                                      blocked_by="resolver", attempted="null (redacted view)"))
-    tools = await load_tools(grants)
+    tools = await load_tools(grants, ctx.connector_headers)
     tools += make_agent_tools(eff.get("sub_agents") or [], ctx, recorder)
 
     has_tools = bool(tools)
@@ -190,6 +190,16 @@ async def _build(spec: dict[str, Any], recorder: Recorder, ctx: RunCtx, checkpoi
     agent = create_agent(model, tools=tools, system_prompt=prompt, middleware=middleware,
                          checkpointer=checkpointer, name=spec.get("agent"))
     return _Built(agent=agent, grants=grants, model_cfg=model_cfg)
+
+
+def root_connector_headers(recorder: Recorder) -> dict[str, str]:
+    """Trusted identity headers for the MCP wrappers, set by the runtime alone
+    and computed ONCE at the root run (connectors/README.md): the wrappers
+    check team membership and source run against these, so a child run
+    inherits its root's. Numeric database ids, omitted when unknown."""
+    h = {"X-Reagent-Run-ID": recorder.run_id, "X-Reagent-Team-ID": recorder.team_id,
+         "X-Reagent-User-ID": recorder.user_id}
+    return {k: str(v) for k, v in h.items() if v is not None}
 
 
 def tool_map_note(grants: GrantSet, sub_agents: list[dict[str, Any]]) -> str:
@@ -345,7 +355,11 @@ async def _finalise(built: _Built, spec: dict[str, Any], recorder: Recorder, ctx
         else:
             result.update(status="succeeded")
         result["output"] = recorder.redactor.redact_text(text)[0]  # belt and braces
-    recorder.finish_run(status=result["status"], cost_usd=cost, input_tokens=tokens_in,
+    # runs.cost_usd stores this run's OWN spend only. Each child has its own
+    # row, so storing the rollup too would count sub-agent cost twice in any
+    # SUM over runs (WF4 analytics, the monthly cap). The rollup is computed
+    # at read time: the result here, and GET /v0/runs/{id}.
+    recorder.finish_run(status=result["status"], cost_usd=own_cost, input_tokens=tokens_in,
                         output_tokens=tokens_out, steps=steps, error=result["error"],
                         output=result["output"])
     if result["status"] != "awaiting_approval":
@@ -361,7 +375,14 @@ def _refused(recorder: Recorder, spec: dict[str, Any] | None, err: ReAgentError,
         if recorder.run_id is not None:
             recorder.event("policy_violation", payload={"code": r.code.value, "field": r.field,
                                                         "blocked_by": r.blocked_by, "message": r.message})
-    msg = "; ".join(f"{r.code.value}: {r.message}" for r in err.rejections)
+    def text(r: Rejection) -> str:
+        # Codes without a MESSAGES template render generically and would drop
+        # the detail (E_CONNECTOR_ERROR did); keep what was attempted.
+        m = r.message
+        if r.attempted is not None and str(r.attempted) not in m:
+            m += f" Detail: {r.attempted}"
+        return f"{r.code.value}: {m}"
+    msg = recorder.redactor.redact_text("; ".join(text(r) for r in err.rejections))[0]
     if recorder.run_id is not None:
         recorder.finish_run(status=status, cost_usd=0.0, input_tokens=0, output_tokens=0,
                             steps=0, error=msg)
@@ -421,7 +442,9 @@ async def arun_agent(name: str, input: Any, *, user: str | None = None, trigger:
                      root_permissions=p.root_permissions if p else grants.permissions(),
                      root_team=p.root_team if p else spec.get("team"), user=user,
                      chain=(p.chain if p else ()) + (spec["agent"],),
-                     parent_span_id=p.span_id if p else None)
+                     parent_span_id=p.span_id if p else None,
+                     connector_headers=(p.connector_headers if p else
+                                        root_connector_headers(recorder)))
         _prerun_checks(spec, recorder, grants, p, user, trigger)
         can_pause = any(g.requires_approval for g in grants.grants.values())
         async with _Checkpointer(durable=can_pause) as saver:
@@ -460,15 +483,14 @@ async def _resume(approval: dict[str, Any], decision: str, recorder: Recorder) -
                  deadline=time.monotonic() + float(lim.get("timeout_seconds") or 240),
                  root_permissions=grants.permissions(), root_team=spec.get("team"),
                  user=None, chain=(name,))
+    ctx.connector_headers = {"X-Reagent-Run-ID": str(run_id)}
     async with _Checkpointer() as saver:
         built = await _build(spec, recorder, ctx, saver, grants)
         config = {"configurable": {"thread_id": f"run-{run_id}"},
                   "recursion_limit": max(25, (lim.get("max_steps") or 25) * 4 + 10)}
         snap = await built.agent.aget_state(config)
-        # The child cost already rolled into runs.cost_usd; own cost lives in
-        # the checkpointed state, so only carry the difference.
-        ctx.child_cost_usd = max(0.0, float(prior.get("cost_usd") or 0.0)
-                                 - float(snap.values.get("cost_usd") or 0.0))
+        # Own cost lives in the checkpointed state; children have their own rows.
+        ctx.child_cost_usd = recorder.children_cost(run_id)
         answers = {}
         for intr in snap.interrupts:
             v = intr.value if isinstance(intr.value, dict) else {}

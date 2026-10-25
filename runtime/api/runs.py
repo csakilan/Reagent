@@ -5,6 +5,7 @@
   GET  /v0/runs/{id}/trace                        {run_id, children, events[]}
   GET  /v0/approvals?status=pending|decided|all   {approvals: [Approval]}
   POST /v0/approvals/{id}       {decision}        RunResult | 410
+  GET  /v0/metrics?team&agent&from&to             Metrics (WF4's runtime.db.analytics)
 
 The acting principal comes ONLY from the X-ReAgent-User header (FROZEN D2).
 A `user` field in the body is rejected by the schema, not ignored.
@@ -19,7 +20,7 @@ import asyncio
 import datetime as dt
 from typing import Any, Literal
 
-from fastapi import APIRouter, FastAPI, Header, HTTPException
+from fastapi import APIRouter, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
@@ -142,6 +143,10 @@ async def get_run(run_id: int) -> dict[str, Any]:
     keys = ["run_id", "parent_run_id", "status", "cost_usd", "input_tokens", "output_tokens",
             "steps", "latency_ms", "model", "error"]
     r = dict(zip(keys, row))
+    # runs.cost_usd is own-cost only; the rollup over sub-agents is computed here.
+    from runtime.engine.recorder import Recorder
+    from runtime.guardrails.redaction import Redactor
+    r["cost_usd"] = float(r["cost_usd"] or 0) + Recorder(Redactor()).children_cost(run_id)
     r["output"] = out[0] if out else None
     r["pending_approval_id"] = pend[0] if pend else None
     return _as_result(r)
@@ -247,6 +252,55 @@ async def decide(approval_id: int, body: Decision,
         return JSONResponse({"detail": "approval expired; the action was denied"}, status_code=410)
     res = await adecide_approval(approval_id, decision=body.decision, approver=x_reagent_user)
     return JSONResponse(_as_result(res), status_code=200)
+
+
+@router.get("/v0/metrics")
+async def get_metrics(team: str | None = None, agent: str | None = None,
+                      from_: str | None = Query(default=None, alias="from"),
+                      to: str | None = None,
+                      x_reagent_user: str | None = Header(default=None)) -> JSONResponse:
+    """Analytics, filtered to what the caller can see. The principal comes ONLY
+    from the X-ReAgent-User header (D2); the query string can narrow the view
+    but never widen it, which WF4 enforces in SQL. Computed by WF4's
+    runtime.db.analytics.get_metrics inside one read-only repeatable-read
+    transaction, so the numbers are consistent with each other."""
+    if not x_reagent_user:
+        return JSONResponse({"detail": "X-ReAgent-User header required"}, status_code=401)
+    if not database_url():
+        return JSONResponse({"detail": "analytics needs the database"}, status_code=503)
+    try:
+        from runtime.db.analytics import MetricsAccessError
+        from runtime.db.analytics import get_metrics as _metrics
+    except ImportError:
+        return JSONResponse({"detail": "analytics module not installed"}, status_code=503)
+
+    def parse(v: str | None, name: str) -> dt.datetime | None:
+        if v is None:
+            return None
+        t = dt.datetime.fromisoformat(v.replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            raise ValueError(f"{name} must include a timezone")
+        return t
+
+    def compute() -> dict[str, Any]:
+        with _conn() as c:
+            me = c.execute("select id from users where name=%s", (x_reagent_user,)).fetchone()
+            if not me:
+                raise MetricsAccessError("unknown user")
+            with c.transaction():
+                c.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                return _metrics(c, user_id=me[0], team=team, agent=agent,
+                                since=parse(from_, "from"), until=parse(to, "to"))
+
+    try:
+        # psycopg is blocking and Tiger is ~100ms away: keep the event loop free.
+        body = await asyncio.to_thread(compute)
+    except MetricsAccessError:
+        # Generic on purpose: never confirm whether a team or agent exists.
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    except ValueError as e:
+        return JSONResponse({"detail": str(e)[:200]}, status_code=422)
+    return JSONResponse(body, status_code=200)
 
 
 app = FastAPI(title="ReAgent runtime", version="0")
