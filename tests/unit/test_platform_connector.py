@@ -95,7 +95,7 @@ def test_get_agent_resolve_team_and_validate(url):
 
 
 def test_stubs_say_so(url):
-    assert "E_NOT_AVAILABLE" in str(invoke(url, "propose_agent", {}))
+    assert "E_NOT_AVAILABLE" in str(invoke(url, "record_grade", {}))  # propose_agent is served now (WF2)
 
 
 def test_calls_need_the_runtime_secret_and_a_caller(url):

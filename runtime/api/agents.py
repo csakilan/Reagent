@@ -716,6 +716,43 @@ def get_admin_layers(x_reagent_user: str | None = Header(default=None)):
             "connectors": sorted(cat.connectors), "models": sorted(cat.models)}
 
 
+@router.get("/meta-agents", tags=["meta-agents"])
+def get_meta_agents(x_reagent_user: str | None = Header(default=None)):
+    """Runnable meta-agents (SPEC.md §10): names and descriptions only. Every user may
+    run them; their configs are enterprise-level and never returned to a member."""
+    cat = load_catalog()
+    _principal(cat, x_reagent_user)
+    out = []
+    for name in sorted(cat.agents):
+        doc = cat.latest(name)
+        md = doc["metadata"]
+        if md.get("level") == "enterprise" and md.get("access") == "run_only":
+            spec = doc.get("spec", {})
+            out.append({"name": name, "description": (spec.get("use_case") or {}).get("description", ""),
+                        "input": (spec.get("input") or {}).get("properties", {})})
+    return {"meta_agents": out}
+
+
+@router.post("/meta-agents/{name}/runs", status_code=202, tags=["meta-agents"])
+def post_meta_agent_run(name: str, body: dict[str, Any] = Body(...),
+                        x_reagent_user: str | None = Header(default=None)):
+    """Run a meta-agent for the CALLER: it acts on the caller's team only (FROZEN D1),
+    sees the enterprise prompt but never the caller's team prompt (D21), and reaches
+    the platform through the platform connector, filtered by the caller."""
+    from runtime.engine import run_agent
+    cat = load_catalog()
+    user, _, _ = _principal(cat, x_reagent_user)
+    doc = cat.latest(name)
+    if doc is None or doc["metadata"].get("access") != "run_only":
+        raise HTTPException(404, "not found")
+    payload = (body or {}).get("input")
+    if not isinstance(payload, dict):
+        raise HTTPException(422, "body.input must be an object")
+    r = run_agent(name, payload, user=user, trigger="http")
+    keep = ("run_id", "status", "output", "error", "cost_usd", "steps", "model", "rejections")
+    return {k: r.get(k) for k in keep if k in r}
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="ReAgent agents (wf/resolver)")
     app.include_router(router)

@@ -8,7 +8,7 @@ import { API_URL, DEMO_USERS, call, getDemoUser, listApprovals, setDemoUser, typ
 
 const sections = [
   { title: "Start", links: [{ href: "/", label: "Getting started" }] },
-  { title: "Agents", links: [{ href: "/agents", label: "Your agents" }, { href: "/publish", label: "Publish pipeline" }] },
+  { title: "Agents", links: [{ href: "/agents", label: "Your agents" }, { href: "/publish", label: "Publish pipeline" }, { href: "/meta-agents", label: "Meta-agents" }] },
   { title: "Policy", links: [{ href: "/hierarchy", label: "Hierarchy" }] },
   { title: "Runs", links: [{ href: "/traces", label: "Trace viewer" }, { href: "/approvals", label: "Approvals" }] },
 ];

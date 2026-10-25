@@ -9,9 +9,8 @@ Who is calling: X-Reagent-User, the root run's user, set by the runtime alone
 (runner.arun_agent) and trusted only with the runtime's shared secret
 (Authorization: Bearer $CONNECTOR_SHARED_SECRET), like every wrapper header.
 
-Served: resolve_team, search_agents, get_agent, validate.
-Stubbed: run_evals, get_runs, record_grade, propose_agent, request_connector
-answer E_NOT_AVAILABLE. They must still be LISTED: load_tools fails a run with
+Served: resolve_team, search_agents, get_agent, validate, run_evals, propose_agent,
+request_connector. Stubbed: get_runs, record_grade answer E_NOT_AVAILABLE. They must still be LISTED: load_tools fails a run with
 E_CONNECTOR_DRIFT when a granted action is missing on its server.
 """
 from __future__ import annotations
@@ -28,8 +27,8 @@ from fastapi import HTTPException
 from mcp.server.fastmcp import Context, FastMCP
 
 PATH = "/mcp/platform"
-SERVED = ("resolve_team", "search_agents", "get_agent", "validate")
-STUBBED = ("run_evals", "get_runs", "record_grade", "propose_agent", "request_connector")
+SERVED = ("resolve_team", "search_agents", "get_agent", "validate", "run_evals", "propose_agent", "request_connector")
+STUBBED = ("get_runs", "record_grade")
 
 
 class PlatformError(ValueError):
@@ -79,6 +78,68 @@ def validate(user: str, spec_yaml: str) -> dict[str, Any]:
     return _http(post_validate, "draft", {"spec": spec_yaml}, x_reagent_user=user)
 
 
+def run_evals(user: str, agent: str, runs_per_case: int = 1, model: str | None = None) -> dict[str, Any]:
+    """The agent's eval suite in the mocked sandbox, optionally on another model the
+    caller's team allows (cost-optimizer's grid). Filtered by the caller (WF2 engine)."""
+    from runtime.api.agents import _principal, _visible
+    from runtime.evals import run_evals as _run
+    from runtime.resolver import load_catalog
+    cat = load_catalog()
+    _, is_admin, team = _principal(cat, user)
+    doc = cat.latest(agent)
+    if doc is None or not _visible(doc, is_admin, team):
+        raise PlatformError(f"E_NOT_FOUND: no agent {agent} visible to {user}")
+    rep = _run(agent, max(1, min(int(runs_per_case), 5)), caller=user, catalog=cat,
+               overrides={"spec": {"model": {"id": model}}} if model else None)
+    keep = ("agent", "pass_rate", "pass_rate_ci_low", "pass_rate_ci_high", "safety_pass_rate",
+            "avg_cost", "p95_latency", "gate_blocked", "gate_reasons", "error", "runs_per_case")
+    return {**{k: rep.get(k) for k in keep}, "model": model or doc["spec"]["model"]["id"],
+            "cases": [{"case_id": c["case_id"], "passed": c["passed"], "reasons": c.get("reasons", [])}
+                      for c in rep["cases"]]}
+
+
+def propose_agent(user: str, spec_yaml: str) -> dict[str, Any]:
+    """Save a draft for the user to review. Meta-agents propose; they never publish
+    (SPEC.md §11). The draft lands in the caller's team only."""
+    import yaml as _yaml
+    from runtime.api.agents import _principal
+    from runtime.resolver import load_catalog
+    from runtime.resolver.validate import validate_draft_text
+    cat = load_catalog()
+    _, is_admin, team = _principal(cat, user)
+    try:
+        doc = _yaml.safe_load(spec_yaml)
+    except _yaml.YAMLError:
+        raise PlatformError("E_SCHEMA_INVALID: the draft is not valid YAML")
+    if not isinstance(doc, dict) or doc.get("kind") != "Agent":
+        raise PlatformError("E_SCHEMA_INVALID: a draft is one kind: Agent document")
+    md = doc.setdefault("metadata", {})
+    if not is_admin:
+        md["level"], md["team"] = "team", team
+    checked = validate_draft_text(_yaml.safe_dump(doc, sort_keys=False), cat)
+    name = md.get("name")
+    if not name or cat.agent_versions(name):
+        raise PlatformError(f"E_NAME_TAKEN: choose a new name; {name!r} already exists")
+    import os as _os
+    if _os.environ.get("REAGENT_LAYERS", "files").lower() == "db":
+        from runtime.publish.pgstore import PgStore
+        PgStore().create_draft(doc)
+    else:
+        from runtime.resolver.source import register_draft
+        register_draft(doc)
+    return {"name": name, "team": md.get("team"), "status": "draft", "valid": checked["valid"],
+            "rejections": checked["rejections"], "review": f"/agents/{name}/edit"}
+
+
+def request_connector(user: str, description: str) -> dict[str, Any]:
+    """File a connector request with enterprise admins for the caller's team."""
+    from runtime.api.agents import post_connector_request
+    try:
+        return post_connector_request({"description": description}, x_reagent_user=user)
+    except HTTPException as e:
+        raise PlatformError(f"E_REQUEST_REFUSED: {e.detail}")
+
+
 def _stub(action: str):
     def run(user: str, **_: Any) -> dict[str, Any]:
         raise PlatformError(f"E_NOT_AVAILABLE: platform:{action} is not served in this build")
@@ -87,6 +148,8 @@ def _stub(action: str):
 
 ACTIONS: dict[str, Any] = {"resolve_team": resolve_team, "search_agents": search_agents,
                            "get_agent": get_agent, "validate": validate,
+                           "run_evals": run_evals, "propose_agent": propose_agent,
+                           "request_connector": request_connector,
                            **{a: _stub(a) for a in STUBBED}}
 
 
@@ -148,6 +211,22 @@ def build_server():
     @server.tool(name=names["validate"], description="Validate a draft .agent YAML; returns rejections.")
     def _validate(spec_yaml: str, ctx: Context) -> str:
         return out(call("validate", _caller(ctx), {"spec_yaml": spec_yaml}))
+
+    @server.tool(name=names["run_evals"],
+                 description="Run an agent's eval suite in the mocked sandbox, optionally on another "
+                             "model the team allows. Returns pass rate, cost and each case's result.")
+    def _evals(agent: str, ctx: Context, runs_per_case: int = 1, model: str | None = None) -> str:
+        return out(call("run_evals", _caller(ctx), {"agent": agent, "runs_per_case": runs_per_case, "model": model}))
+
+    @server.tool(name=names["propose_agent"],
+                 description="Save a draft .agent for the user to review. Never publishes.")
+    def _propose(spec_yaml: str, ctx: Context) -> str:
+        return out(call("propose_agent", _caller(ctx), {"spec_yaml": spec_yaml}))
+
+    @server.tool(name=names["request_connector"],
+                 description="File a request with enterprise admins for a connector the team lacks.")
+    def _request(description: str, ctx: Context) -> str:
+        return out(call("request_connector", _caller(ctx), {"description": description}))
 
     def stub_for(action: str):
         def stub(ctx: Context) -> str:

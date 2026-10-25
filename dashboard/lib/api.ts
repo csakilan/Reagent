@@ -133,3 +133,8 @@ export const adminLayers = () => untyped("GET", "/v0/admin/layers");
 export const saveLayer = (target: string, spec: string, dryRun: boolean) =>
   untyped("POST", target === "enterprise" ? "/v0/admin/enterprise" : `/v0/admin/teams/${encodeURIComponent(target)}`, { spec, dry_run: dryRun });
 export const registerItem = (kind: "connector" | "model", spec: string) => untyped("POST", "/v0/admin/registry", { kind, spec });
+
+// -- Meta-agents (MVP row 8) ---------------------------------------------------------
+export type MetaAgent = { name: string; description: string; input: Record<string, unknown> };
+export const metaAgents = () => untyped("GET", "/v0/meta-agents");
+export const runMetaAgent = (name: string, input: Record<string, unknown>) => untyped("POST", `/v0/meta-agents/${encodeURIComponent(name)}/runs`, { input });

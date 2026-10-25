@@ -120,7 +120,10 @@ _ARG_SCHEMAS: dict[str, dict[str, Any]] = {
         "required": ["bucket"]},
     "platform": {"type": "object", "properties": {
         "query": {"type": "string"}, "limit": {"type": "integer"}, "name": {"type": "string"},
-        "team": {"type": "string"}, "spec_yaml": {"type": "string"}}},
+        "team": {"type": "string"}, "spec_yaml": {"type": "string"},
+        # WF2: arguments of run_evals, propose_agent and request_connector.
+        "agent": {"type": "string"}, "runs_per_case": {"type": "integer"}, "model": {"type": "string"},
+        "description": {"type": "string"}}},
 }
 
 

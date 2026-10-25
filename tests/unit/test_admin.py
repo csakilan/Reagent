@@ -75,3 +75,26 @@ def test_registering_a_model_makes_it_grantable():
                            "spec": {"provider": "openrouter", "model": "openai/gpt-oss-20b", "supports_tools": True}})
     r = client.post("/v0/admin/registry", json={"kind": "model", "spec": spec}, headers=FRANK)
     assert r.status_code == 201 and "tiny-model" in load_catalog().models
+
+
+def test_meta_agents_are_listed_without_configs_and_run_for_the_caller():
+    pytest.importorskip("langchain")
+    listed = client.get("/v0/meta-agents", headers=BOB).json()["meta_agents"]
+    assert {m["name"] for m in listed} == {"agent-builder", "cost-optimizer", "evaluator", "failure-triage", "security-reviewer"}
+    assert all(set(m) == {"name", "description", "input"} for m in listed)       # no spec, prompt or tools
+    assert client.post("/v0/meta-agents/secret-scanner/runs", json={"input": {}}, headers=BOB).status_code == 404
+
+
+def test_platform_actions_are_filtered_by_the_caller():
+    pytest.importorskip("langchain")
+    from runtime.api import platform
+    assert platform.call("run_evals", "bob", {"agent": "pr-reviewer"})["runs_per_case"] == 1
+    with pytest.raises(platform.PlatformError):
+        platform.call("run_evals", "bob", {"agent": "people-ops-bot"})
+    draft = ("apiVersion: reagent/v0\nkind: Agent\nmetadata: {name: proposed-x, version: 0.1.0, level: team, team: people-ops}\n"
+             "spec:\n  use_case: {description: x, desired_outcome: y}\n  model: {id: qwen-coder}\n  prompt: {task: t}\n"
+             "  triggers: [{type: http}]\n  ownership: {owners: [bob]}\n")
+    out = platform.call("propose_agent", "bob", {"spec_yaml": draft})
+    assert out["team"] == "platform-eng" and out["status"] == "draft"      # never another team's
+    source._DRAFTS.pop("proposed-x", None)
+    assert platform.call("request_connector", "bob", {"description": "slack"})["team"] == "platform-eng"
