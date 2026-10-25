@@ -95,9 +95,31 @@ function summary(event: RunEvent): string {
     case "redaction_hit": return `${d.pattern} in ${d.location} × ${d.count ?? 1}`;
     case "approval_requested": return `${d.risk ?? ""} risk · approval ${d.approval_id ?? ""}`;
     case "approval_decided": return `${d.decision ?? ""}${d.approver ? ` by ${d.approver}` : ""}`;
+    case "metric": return metricSummary(d);
     default: return String(d.code ?? d.message ?? d.error ?? "");
   }
 }
+
+/** Memory reports through `metric` events (runtime/engine/memory_recall.py, memory_curation.py). */
+function metricSummary(d: Detail): string {
+  const name = String(d.name ?? "metric"), value = num(d.value);
+  const detail = (d.detail && typeof d.detail === "object" ? d.detail : {}) as Record<string, unknown>;
+  if (name === "memory_recalled")
+    return `${value} item${value === 1 ? "" : "s"} put in the run's context · ` +
+      Object.entries(detail).map(([bucket, ids]) => `${bucket} ×${Array.isArray(ids) ? ids.length : 0}`).join(", ");
+  if (name.startsWith("memory_written.")) return `${value} ${name.slice("memory_written.".length)} memory written`;
+  if (name === "memory_dropped") return `${value} proposal${value === 1 ? "" : "s"} dropped · ${String(detail.reason ?? "")}`;
+  if (name === "memory_curated")
+    return detail.skipped ? `not curated · ${String(detail.skipped)}` : `curated by memory-curator, run ${String(detail.curator_run_id ?? "?")}`;
+  if (name === "procedure_promoted") return `procedure ${String(detail.item_id ?? "")} promoted · ${String(detail.reason ?? "")}`;
+  if (name === "procedure_rejected") return `procedure ${String(detail.item_id ?? "")} rejected · ${String(detail.reason ?? "")}`;
+  if (name === "procedure_gate_pending") return `procedure ${String(detail.item_id ?? "")} pending · ${String(detail.reason ?? "")}`;
+  return `${value}`;
+}
+
+const metricNamed = (events: RunEvent[], test: (name: string) => boolean) =>
+  events.filter(event => event.type === "metric" && test(String(payloadOf(event).name ?? "")))
+    .reduce((sum, event) => sum + num(payloadOf(event).value), 0);
 
 function RunForm({ initialAgent }: { initialAgent: string }) {
   const router = useRouter();
@@ -179,6 +201,9 @@ function RunTrace({ runId }: { runId: number }) {
   const tools = events.filter(event => event.type === "tool_call");
   const denied = tools.filter(event => event.allowed === false).length;
   const redactions = events.filter(event => event.type === "redaction_hit").reduce((sum, event) => sum + (num(payloadOf(event).count) || 1), 0);
+  const recalled = metricNamed(events, name => name === "memory_recalled");
+  const learned = metricNamed(events, name => name === "memory_written.semantic" || name === "memory_written.procedural");
+  const hasMemory = events.some(event => event.type === "metric" && String(payloadOf(event).name ?? "").startsWith("memory_"));
   const result = run.phase === "ready" ? run.data : null;
   const statusKind = result?.status === "succeeded" ? "pass" : result && ["failed", "denied", "cancelled"].includes(result.status) ? "fail" : "pending";
   const toggle = (index: number) => setOpen(current => { const next = new Set(current); if (next.has(index)) next.delete(index); else next.add(index); return next; });
@@ -198,6 +223,7 @@ function RunTrace({ runId }: { runId: number }) {
       <div><span>Steps</span><b>{result.steps ?? "—"}</b></div>
       <div><span>Tool calls</span><b>{tools.length}{denied ? <em className="denied-text"> · {denied} denied</em> : null}</b></div>
       <div><span>Redactions</span><b>{redactions}</b></div>
+      {hasMemory && <div><span>Team memory</span><b>{recalled} recalled · {learned} learned</b></div>}
     </div>}
     {result?.status === "awaiting_approval" && <div className="notice"><span>This run is paused for a human decision. <Link href="/approvals">Open the approvals queue</Link>.</span></div>}
     {result?.error && <div className="notice notice-denied"><b>Error</b> {result.error}</div>}
@@ -213,7 +239,8 @@ function RunTrace({ runId }: { runId: number }) {
         const isDenied = event.type === "tool_call" && event.allowed === false;
         const isViolation = event.type === "policy_violation" || event.type === "error";
         const isOpen = open.has(index);
-        const name = event.action ?? (event.type === "span_open" || event.type === "span_close" ? String(detail.agent ?? detail.name ?? "span") : event.type.replace("_", " "));
+        const name = event.action ?? (event.type === "span_open" || event.type === "span_close" ? String(detail.agent ?? detail.name ?? "span")
+          : event.type === "metric" ? String(detail.name ?? "metric") : event.type.replace("_", " "));
         const left = built.total ? (row.start / built.total) * 100 : 0;
         const width = built.total ? Math.max(0.6, (row.duration / built.total) * 100) : 0;
         return <Fragment key={`${row.runId}-${event.seq}-${index}`}>
