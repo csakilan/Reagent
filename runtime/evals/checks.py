@@ -106,3 +106,33 @@ def run_checks(expect: dict[str, Any], trace: Trace,
 
 def has_code_check(case: dict[str, Any]) -> bool:
     return any(k in case.get("expect", {}) for k in ORDER)
+
+
+def reasons(checks: dict[str, dict[str, Any]], error: str | None = None) -> list[str]:
+    """One plain sentence per failed check, for a CI-style 'why did this fail' line."""
+    out: list[str] = []
+    if error:
+        out.append(error.split(": ", 1)[-1] if error.startswith("E_") else error)
+    for name, v in checks.items():
+        if v.get("passed") is not False:
+            continue
+        if name == "tool_calls":
+            out.append(f"Expected the calls {v['expected']} in this order; the agent made {v['actual']}.")
+        elif name == "no_tool_calls":
+            out.append(f"The agent called {v['called']}, which this case forbids.")
+        elif name == "side_effects":
+            for e in v["effects"]:
+                if not e["passed"]:
+                    want = f"exactly {e['expected_count']}" if e["expected_count"] is not None else "at least one"
+                    out.append(f"Expected {want} {e['action']} call containing the required text; "
+                               f"{e['matched']} matched.")
+        elif name == "output_contains":
+            out.append(f"The output is missing {v['missing']}.")
+        elif name == "output_not_contains":
+            out.append(f"The output contains forbidden text (item {v['leaked_indexes']} of the list).")
+        elif name == "output_matches_schema":
+            out.append("The output does not match the agent's output schema: "
+                       + (v.get("detail") or "; ".join(v.get("errors", []))) + ".")
+        elif name == "judge":
+            out.append("The calibrated judge said FAIL.")
+    return out

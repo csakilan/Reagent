@@ -109,3 +109,37 @@ def test_fork_into_own_team_records_the_exact_source_version():
     assert client.post("/v0/agents/code-reviewer/fork", json={"new_name": "Bad Name"},
                        headers=H).status_code == 422
     source._DRAFTS.clear()
+
+
+def test_new_agent_forks_the_teams_base_config():
+    """Starting from scratch is forking the team's base config: it inherits the
+    enterprise and team layers and adds nothing, not even tools."""
+    from runtime.resolver import source
+    source._DRAFTS.clear()
+    H = {"X-ReAgent-User": "alice"}
+    r = client.post("/v0/agents/team:platform-eng/fork", json={"new_name": "fresh-agent"}, headers=H)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["team"] == "platform-eng" and body["forked_from"] is None and body["rejections"] == []
+    doc = get("fresh-agent", "alice").json()
+    assert [p["source"] for p in doc["provenance"]["prompt"]] == ["enterprise", "team:platform-eng", "agent"]
+    assert not [t for t in doc["effective"]["tool_permissions"] if t["connector"] != "memory"]
+    assert client.post("/v0/agents/team:people-ops/fork", json={"new_name": "x"}, headers=H).status_code == 404
+    source._DRAFTS.clear()
+
+
+def test_already_running_names_the_pipeline_and_it_can_be_abandoned():
+    pytest.importorskip("langchain")
+    from runtime.publish import STORE
+    STORE.runs.clear()
+    H = {"X-ReAgent-User": "alice"}
+    rid = client.post("/v0/agents/pr-reviewer/publish", headers=H).json()["publish_run_id"]
+    refused = client.post("/v0/agents/pr-reviewer/publish", headers=H)
+    rej = refused.json()["rejections"][0]
+    assert refused.status_code == 409 and rej["publish_run_id"] == rid and rej["stage"] == "review"
+    assert rej["message"].startswith("A publish pipeline is already running for this agent")
+    steps = client.get(f"/v0/publish-runs/{rid}", headers=H).json()["steps"]
+    assert [s["status"] for s in steps] == ["passed", "passed", "passed", "waiting", "pending", "pending", "pending"]
+    assert client.post(f"/v0/publish-runs/{rid}/abandon", headers=H).json()["status"] == "abandoned"
+    assert client.post("/v0/agents/pr-reviewer/publish", headers=H).status_code == 202
+    STORE.runs.clear()

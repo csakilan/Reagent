@@ -251,48 +251,89 @@ def post_calibration(body: dict[str, Any] = Body(...),
 NAME = re.compile(r"^[a-z0-9-]+$")
 
 
+@router.post("/publish-runs/{run_id}/abandon")
+def post_abandon(run_id: int, x_reagent_user: str | None = Header(default=None)):
+    """Abandon a running pipeline, freeing the agent for a new one (FROZEN D17).
+    Not in contracts/openapi.yaml yet: the 409 for an already-running pipeline names
+    the run, and this is how the dashboard clears it. Reported for a contract update."""
+    from runtime.publish import abandon, view
+    run = _run_for(run_id, load_catalog(), x_reagent_user)
+    return view(abandon(run["id"]))
+
+
+def team_base(cat: Catalog, team: str, owner: str, name: str) -> dict[str, Any]:
+    """The team's base config as a blank agent: it inherits the enterprise and team
+    layers and adds nothing. No tools (least privilege, SPEC.md §1), the team's
+    first allowed model, an http trigger, and placeholders the author replaces."""
+    spec = cat.team(team) or {}
+    allowed = (spec.get("models") or {}).get("allow") or (cat.ent.get("models") or {}).get("allow") or ["*"]
+    model = next((p for p in allowed if p in cat.models), next(iter(sorted(cat.models)), ""))
+    return {"apiVersion": "reagent/v0", "kind": "Agent",
+            "metadata": {"name": name, "version": "0.1.0", "level": "team", "team": team},
+            "spec": {"use_case": {"description": "What this agent does.",
+                                  "desired_outcome": "What success looks like."},
+                     "model": {"id": model},
+                     "prompt": {"task": "Describe the task step by step."},
+                     "triggers": [{"type": "http"}],
+                     "ownership": {"owners": [owner]}}}
+
+
 @router.post("/agents/{name}/fork", status_code=201)
 def post_fork(name: str, body: dict[str, Any] = Body(...),
               x_reagent_user: str | None = Header(default=None)):
-    """Fork a team agent into the caller's team as a new draft. SPEC.md §12, FROZEN D24:
-    `forked_from` records the source's EXACT version, never a range."""
+    """Fork into the caller's team as a new draft. SPEC.md §12, FROZEN D24.
+
+    `name` is a team agent, and `forked_from` records its EXACT version, never a
+    range. Or `name` is `team:<team>`: the team's base config, which is how a new
+    agent starts from scratch. Agent names cannot contain ':', so it never collides."""
     from runtime.resolver import resolve_document
     from runtime.resolver.source import register_draft
 
     cat = load_catalog()
     user, is_admin, team = _principal(cat, x_reagent_user)
-    src = cat.latest(name)
-    if src is None or not _visible(src, is_admin, team):
-        raise HTTPException(404, "not found")
-    if src["metadata"].get("level") != "team":
-        raise HTTPException(422, "only team agents can be forked")
-    target = team or src["metadata"].get("team")
-    if not is_admin and src["metadata"].get("team") != team:
-        return JSONResponse(status_code=403, content={"rejections": [Rejection(
-            Code.FORK_OUTSIDE_TEAM, "metadata.forked_from", f"team:{team}", attempted=name).to_dict()]})
     new_name = (body or {}).get("new_name", "")
+    base_team = name[len("team:"):] if name.startswith("team:") else None
+    src = None
+    if base_team is not None:
+        if cat.team(base_team) is None or not (is_admin or base_team == team):
+            raise HTTPException(404, "not found")
+        target = base_team
+    else:
+        src = cat.latest(name)
+        if src is None or not _visible(src, is_admin, team):
+            raise HTTPException(404, "not found")
+        if src["metadata"].get("level") != "team":
+            raise HTTPException(422, "only team agents can be forked")
+        target = team or src["metadata"].get("team")
+        if not is_admin and src["metadata"].get("team") != team:
+            return JSONResponse(status_code=403, content={"rejections": [Rejection(
+                Code.FORK_OUTSIDE_TEAM, "metadata.forked_from", f"team:{team}", attempted=name).to_dict()]})
     if not NAME.match(new_name or ""):
         raise HTTPException(422, "new_name must match ^[a-z0-9-]+$")
     if cat.agent_versions(new_name):
         raise HTTPException(409, f"an agent called {new_name} already exists")
 
-    doc = copy.deepcopy(src)
+    if src is None:
+        doc = team_base(cat, target, user, new_name)
+    else:
+        doc = copy.deepcopy(src)
+        doc["metadata"].update(name=new_name, version="0.1.0", team=target,
+                               forked_from=f"{name}@{src['metadata']['version']}")
+        doc["spec"].setdefault("ownership", {})["owners"] = [user]
     md = doc["metadata"]
-    md.update(name=new_name, version="0.1.0", team=target,
-              forked_from=f"{name}@{src['metadata']['version']}")
-    doc["spec"].setdefault("ownership", {})["owners"] = [user]
     resolved = resolve_document(doc, catalog=cat, caller=None)
 
     if os.environ.get("REAGENT_LAYERS", "files").lower() == "db":
         from runtime.publish.pgstore import PgStore
-        PgStore().create_draft(doc, forked_from=(name, str(src["metadata"]["version"])))
+        PgStore().create_draft(doc, forked_from=(name, str(src["metadata"]["version"])) if src else None)
     else:
         register_draft(doc)
     spec = doc["spec"]
     return {"name": new_name, "version": md["version"], "status": "draft", "team": target,
             "level": "team", "description": spec.get("use_case", {}).get("description", ""),
             "desired_outcome": spec.get("use_case", {}).get("desired_outcome"),
-            "tags": md.get("tags", []), "forked_from": md["forked_from"], "update_available": False,
+            "tags": md.get("tags", []), "forked_from": md.get("forked_from"),
+            "update_available": False,
             "spec_yaml": yaml.safe_dump(doc, sort_keys=False),
             "versions": [{"version": md["version"], "status": "draft", "published_at": None,
                           "published_by": None}],

@@ -24,7 +24,7 @@ from contracts.errors import Code, Rejection
 
 from runtime.resolver import load_catalog, resolve_document
 
-from .checks import TRAJECTORY, Trace, has_code_check, run_checks
+from .checks import TRAJECTORY, Trace, has_code_check, reasons, run_checks
 from .sandbox import sandboxed
 from .stats import percentile, rate, wilson
 
@@ -220,6 +220,12 @@ def run_evals(agent: str, runs_per_case: int | None = None, *, fake_model: bool 
                 "checks": graded[-1]["checks"] if graded else {},
                 "tool_calls": [p for p, _ in mine[-1].calls] if mine else [],
                 "blocked_calls": list(mine[-1].denied) if mine else [],
+                # CI-style detail: what went in, what came out, and why it failed.
+                # Inherited cases keep their contents hidden (SPEC.md §11).
+                "input": item["case"].get("input") if item["origin"] != "inherited" else None,
+                "output": (mine[-1].text or "")[:4000] if mine else "",
+                "reasons": reasons(graded[-1]["checks"], errors[0] if errors else None)
+                           if graded and passes < k else [],
                 "inert_mocks": (sorted(set(inert_mocks(resolved)) - set(item["case"].get("mocks") or {}))
                                 if item["origin"] == "inherited" and inherited_mock_mode() == "inert"
                                 else []),

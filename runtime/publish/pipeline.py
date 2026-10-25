@@ -263,8 +263,77 @@ def abandon(run_id: int, *, store: MemoryStore = STORE) -> dict[str, Any]:
     return run
 
 
+#: What each stage is for, in the words the dashboard shows (SPEC.md §11).
+STAGE_INFO = {
+    "validate": ("Validate", "Checks the draft against the schema and resolves it against the "
+                 "enterprise and team layers. Fails if any rule is widened."),
+    "security": ("Security review", "Flags destructive actions without approval, unused "
+                 "permissions, broad resource globs and on_behalf_of where service would do."),
+    "generate": ("Generate tests", "Carries over approved cases and proposes new ones for any "
+                 "coverage gap: every kind (positive, negative, safety) and every callable action."),
+    "review": ("Human review", "A person approves, edits or rejects every new or changed case. "
+               "Nothing publishes with unreviewed tests. This is the one human gate."),
+    "evals": ("Run evals", "Runs every approved case, plus the enterprise's inherited cases, in a "
+              "mocked sandbox. Code checks first, then the judge if it is calibrated."),
+    "gate": ("Gate", "Publishes only if the pass rate meets the threshold, safety cases pass at "
+             "100%, and there is no significant regression against the previous version."),
+    "publish": ("Publish", "Re-validates against the layers as they are now, then creates an "
+                "immutable version with the eval report attached."),
+}
+
+
+def _summary(run: dict[str, Any], stage: str) -> str:
+    res = run["stage_results"].get(stage) or {}
+    if res.get("rejections"):
+        return res["rejections"][0]["message"]
+    if stage == "validate" and res:
+        return "the draft resolves against its enterprise and team layers with no rejections"
+    if stage == "security" and res:
+        f = res.get("findings") or {}
+        return (f"{len(f.get('blocking', []))} blocking, {len(f.get('advisory', []))} advisory finding(s)"
+                + ("" if res.get("acknowledged") else ", not yet acknowledged"))
+    if stage == "generate" and res:
+        return (f"{len(res.get('proposed', []))} case(s) proposed, "
+                f"{res.get('carried_over', 0)} carried over from an earlier approval")
+    if stage == "review":
+        open_ = sum(1 for c in run["cases"] if c["decision"] is None)
+        if open_:
+            return f"Waiting for you: approve, edit or reject {open_} case(s), then continue."
+        return f"{res.get('approved', 0)} approved, {res.get('rejected', 0)} rejected" if res else ""
+    if stage == "evals" and run.get("report"):
+        r = run["report"]
+        return (f"pass rate {r['pass_rate']:.2f} [{r['pass_rate_ci_low']:.2f}, "
+                f"{r['pass_rate_ci_high']:.2f}] over {r['runs_per_case']} run(s) per case")
+    if stage == "gate" and res:
+        return "thresholds met" if res.get("passed") else "; ".join(res.get("reasons", []))
+    if stage == "publish" and res.get("passed"):
+        return f"published {run['agent']}@{res.get('version')}"
+    return ""
+
+
+def steps(run: dict[str, Any]) -> list[dict[str, Any]]:
+    """The pipeline as a GitHub-Actions-style step list."""
+    from .store import STAGES
+    out, reached = [], True
+    for name in STAGES:
+        title, what = STAGE_INFO[name]
+        res = run["stage_results"].get(name)
+        if res is not None and name != run["stage"]:
+            status = "passed" if res.get("passed") else "failed"
+        elif name == run["stage"]:
+            status = {"failed": "failed", "succeeded": "passed", "abandoned": "abandoned"}.get(
+                run["status"], "waiting" if name == "review" else "running")
+            reached = False
+        else:
+            status = "pending" if not reached else "passed"
+        out.append({"stage": name, "title": title, "what": what, "status": status,
+                    "summary": _summary(run, name)})
+    return out
+
+
 def view(run: dict[str, Any]) -> dict[str, Any]:
     """The PublishRun shape (contracts/openapi.yaml). Inherited case bodies stay hidden."""
     out = {k: v for k, v in run.items() if k not in ("draft", "cases")}
     out["cases"] = [{k: v for k, v in c.items() if not k.startswith("_")} for c in run["cases"]]
+    out["steps"] = steps(run)
     return out

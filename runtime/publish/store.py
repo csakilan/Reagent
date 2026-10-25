@@ -23,6 +23,16 @@ from contracts.errors import Code, ReAgentError, Rejection
 STAGES = ("validate", "security", "generate", "review", "evals", "gate", "publish")
 
 
+def already_running(agent: str, run_id: int, stage: str) -> Rejection:
+    """FROZEN D17 allows one running pipeline per agent. Name the one in the way,
+    so the dashboard can open it (or abandon it) instead of dead-ending."""
+    return Rejection(Code.PIPELINE_ALREADY_RUNNING, "agent", "default", attempted=agent,
+                     extra={"publish_run_id": run_id, "stage": stage,
+                            "message": f"A publish pipeline is already running for this agent: "
+                                       f"pipeline {run_id}, waiting at stage {stage}. Open it to "
+                                       f"continue, or abandon it to start again."})
+
+
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
 
@@ -38,9 +48,10 @@ class MemoryStore:
     # -- runs ----------------------------------------------------------------
     def create_run(self, agent: str, draft: dict[str, Any], started_by: str) -> dict[str, Any]:
         with self._lock:
-            if any(r["agent"] == agent and r["status"] == "running" for r in self.runs.values()):
-                raise ReAgentError(Rejection(Code.PIPELINE_ALREADY_RUNNING, "agent", "default",
-                                             attempted=agent))
+            busy = next((r for r in self.runs.values()
+                         if r["agent"] == agent and r["status"] == "running"), None)
+            if busy is not None:
+                raise ReAgentError(already_running(agent, busy["id"], busy["stage"]))
             rid = next(self._ids)
             run = {"id": rid, "agent": agent,
                    "draft_version": str(draft["metadata"].get("version")),

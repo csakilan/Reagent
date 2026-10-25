@@ -108,7 +108,11 @@ class PgStore:
                     (aid, vid, uid)).fetchone()
             except psycopg.errors.UniqueViolation:
                 c.rollback()
-                raise ReAgentError(Rejection(Code.PIPELINE_ALREADY_RUNNING, "agent", "default",
+                busy = c.execute("SELECT id, stage FROM publish_runs WHERE agent_id = %s "
+                                 "AND status = 'running'", (aid,)).fetchone()
+                from .store import already_running
+                raise ReAgentError(already_running(agent, busy[0], busy[1]) if busy else
+                                   Rejection(Code.PIPELINE_ALREADY_RUNNING, "agent", "default",
                                              attempted=agent))
         return {"id": row[0], "agent": agent, "draft_version": str(draft["metadata"].get("version")),
                 "stage": "validate", "status": "running", "started_by": started_by,

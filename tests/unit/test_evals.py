@@ -179,3 +179,18 @@ def test_calibrated_judge_gates(monkeypatch):
     assert bad["checks"]["judge"]["gating"] and not bad["passed"]
     assert good["passed"] and len(good["checks"]["judge"]["votes"]) == 3
     assert fake_vote("q", "rotate credential immediately", "") is False
+
+
+def test_failed_cases_say_why_in_plain_words():
+    from runtime.evals.checks import reasons
+    t = Trace(status="succeeded", calls=[("github:pulls.read", {})], text="looks fine")
+    checks = run_checks({"side_effects": [{"action": "github:pulls.comment", "args_contains": ["x"], "count": 1}],
+                         "output_contains": ["secret"]}, t, None)
+    why = reasons(checks)
+    assert any("github:pulls.comment" in w and "0 matched" in w for w in why)
+    assert any("missing ['secret']" in w for w in why)
+    r = run_evals("pr-reviewer", runs_per_case=1, fake_model=True, include_inherited=False,
+                  case_ids=["agent/flags-public-s3-bucket"])
+    c = r["cases"][0]
+    assert c["input"] == {"repo": "nmc2/infra", "pr_number": 43} and isinstance(c["output"], str)
+    assert c["passed"] or c["reasons"]
