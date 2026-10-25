@@ -9,13 +9,16 @@ type Team = Setup["teams"][number];
 type Agent = Team["agents"][number];
 type Selection = { kind: "enterprise" } | { kind: "team"; team: Team } | { kind: "agent"; team: Team; agent: Agent };
 type Point = { x: number; y: number };
-const WIDTH = Math.max(900, (exampleSetup.teams.length + 1) * 300);
-const HEIGHT = 570 + Math.max(1, ...exampleSetup.teams.map(team => team.agents.length)) * 134 + 80;
-const enterprisePoint = { x: 600, y: 115 };
-const teamPoint = (_team: Team, index: number, count: number): Point => ({ x: WIDTH * (index + 1) / (count + 1), y: 330 });
+const MAX_AGENTS = Math.max(1, ...exampleSetup.teams.map(team => team.agents.length));
+const TEAM_SPACING = Math.max(700, (MAX_AGENTS - 1) * 220 + 270);
+const SIDE_MARGIN = Math.max(350, (MAX_AGENTS - 1) * 110 + 145);
+const GRAPH_WIDTH = Math.max(1200, SIDE_MARGIN * 2 + TEAM_SPACING * Math.max(0, exampleSetup.teams.length - 1));
+const HEIGHT = 800;
+const enterprisePoint = { x: GRAPH_WIDTH / 2, y: 115 };
+const teamPoint = (_team: Team, index: number, count: number): Point => ({ x: count === 1 ? GRAPH_WIDTH / 2 : SIDE_MARGIN + index * TEAM_SPACING, y: 330 });
 const agentPoint = (team: Team, teamIndex: number, agentIndex: number, teamCount: number): Point => {
   const center = teamPoint(team, teamIndex, teamCount).x;
-  return { x: center, y: 560 + agentIndex * 134 };
+  return { x: center + (agentIndex - (team.agents.length - 1) / 2) * 220, y: 650 };
 };
 const connect = (a: Point, b: Point) => `M ${a.x} ${a.y} C ${a.x} ${(a.y + b.y) / 2}, ${b.x} ${(a.y + b.y) / 2}, ${b.x} ${b.y}`;
 const text = (values: string[] | undefined) => values?.length ? values.join(" · ") : "Not specified in this example";
@@ -34,7 +37,7 @@ function DetailRows({ rows }: { rows: [string, ReactNode][] }) {
 
 export default function ConfigGraph() {
   const [selected, setSelected] = useState<Selection>({ kind: "enterprise" });
-  const [camera, setCamera] = useState({ x: WIDTH / 2 - enterprisePoint.x * 0.78, y: HEIGHT / 2 - enterprisePoint.y * 0.78, zoom: 0.78 });
+  const [camera, setCamera] = useState({ x: GRAPH_WIDTH / 2 - enterprisePoint.x * 0.78, y: HEIGHT / 2 - enterprisePoint.y * 0.78, zoom: 0.78 });
   const [dragging, setDragging] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragOrigin = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
@@ -61,14 +64,14 @@ export default function ConfigGraph() {
     const maxX = Math.max(...allPoints.map(p => p.x)) + 140;
     const minY = Math.min(...allPoints.map(p => p.y)) - 100;
     const maxY = Math.max(...allPoints.map(p => p.y)) + 90;
-    const zoom = Math.min(WIDTH / (maxX - minX), HEIGHT / (maxY - minY), 0.9);
-    setCamera({ zoom, x: WIDTH / 2 - ((minX + maxX) / 2) * zoom, y: HEIGHT / 2 - ((minY + maxY) / 2) * zoom });
+    const zoom = Math.min(GRAPH_WIDTH / (maxX - minX), HEIGHT / (maxY - minY), 0.9);
+    setCamera({ zoom, x: GRAPH_WIDTH / 2 - ((minX + maxX) / 2) * zoom, y: HEIGHT / 2 - ((minY + maxY) / 2) * zoom });
   }
   function focus(point: Point) {
     const zoom = Math.max(0.7, Math.min(1.12, camera.zoom));
-    setCamera({ zoom, x: WIDTH / 2 - point.x * zoom, y: HEIGHT / 2 - point.y * zoom });
+    setCamera({ zoom, x: GRAPH_WIDTH / 2 - point.x * zoom, y: HEIGHT / 2 - point.y * zoom });
   }
-  function zoomAt(nextZoom: number, anchor = { x: WIDTH / 2, y: HEIGHT / 2 }) {
+  function zoomAt(nextZoom: number, anchor = { x: GRAPH_WIDTH / 2, y: HEIGHT / 2 }) {
     const zoom = Math.max(0.42, Math.min(1.65, nextZoom));
     const scale = zoom / camera.zoom;
     setCamera({ zoom, x: anchor.x - (anchor.x - camera.x) * scale, y: anchor.y - (anchor.y - camera.y) * scale });
@@ -96,14 +99,20 @@ export default function ConfigGraph() {
   return <div className="hierarchy-workspace">
     <section className="graph-panel" aria-label="Configuration hierarchy graph">
       <div className="graph-toolbar"><div><span className="eyebrow">Configuration hierarchy</span><div className="graph-count">1 enterprise <b>·</b> {exampleSetup.teams.length} teams <b>·</b> {exampleSetup.teams.reduce((n, team) => n + team.agents.length, 0)} agents</div></div><div className="camera-controls"><button type="button" aria-label="Zoom out" onClick={() => zoomAt(camera.zoom / 1.2)}><CameraIcon kind="minus" /></button><span>{Math.round(camera.zoom * 100)}%</span><button type="button" aria-label="Zoom in" onClick={() => zoomAt(camera.zoom * 1.2)}><CameraIcon kind="plus" /></button><button type="button" aria-label="Fit graph to view" onClick={fit}><CameraIcon kind="fit" /><span>Fit</span></button></div></div>
-      <div className="graph-viewport"><svg ref={svgRef} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className={`hierarchy-svg ${dragging ? "is-dragging" : ""}`} role="group" aria-label="Interactive enterprise, team, and agent hierarchy" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel}>
+      <div className="graph-viewport"><svg ref={svgRef} viewBox={`0 0 ${GRAPH_WIDTH} ${HEIGHT}`} className={`hierarchy-svg ${dragging ? "is-dragging" : ""}`} role="group" aria-label="Interactive enterprise, team, and agent hierarchy" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel}>
         <g className="camera-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
           {exampleSetup.teams.map((team, ti) => {
             const tp = teamPoint(team, ti, exampleSetup.teams.length);
+            const agentPoints = team.agents.map((_, ai) => agentPoint(team, ti, ai, exampleSetup.teams.length));
+            const left = agentPoints.length ? Math.min(...agentPoints.map(point => point.x)) : tp.x;
+            const right = agentPoints.length ? Math.max(...agentPoints.map(point => point.x)) : tp.x;
+            const branch = `M ${tp.x} ${tp.y + 50} V 500 M ${left} 500 H ${right}`;
             return <g key={`edges-${team.name}`}>
               <path id={`enterprise-${team.name}`} className="graph-edge graph-edge-enterprise" d={connect({ x: enterprisePoint.x, y: enterprisePoint.y + 58 }, { x: tp.x, y: tp.y - 51 })} />
               <path className="graph-edge-flow graph-edge-flow-enterprise" d={connect({ x: enterprisePoint.x, y: enterprisePoint.y + 58 }, { x: tp.x, y: tp.y - 51 })} />
-              {team.agents.map((agent, ai) => { const ap = agentPoint(team, ti, ai, exampleSetup.teams.length); return <g key={`edge-${agent.name}`}><path className="graph-edge graph-edge-team" d={connect({ x: tp.x, y: tp.y + 50 }, { x: ap.x, y: ap.y - 42 })} /><path className="graph-edge-flow graph-edge-flow-team" d={connect({ x: tp.x, y: tp.y + 50 }, { x: ap.x, y: ap.y - 42 })} /></g>; })}
+              <path className="graph-edge graph-edge-team" d={branch} />
+              <path className="graph-edge-flow graph-edge-flow-team" d={branch} />
+              {team.agents.map((agent, ai) => { const ap = agentPoints[ai]; const drop = `M ${ap.x} 500 V ${ap.y - 42}`; return <g key={`edge-${agent.name}`}><path className="graph-edge graph-edge-team" d={drop} /><path className="graph-edge-flow graph-edge-flow-team" d={drop} /></g>; })}
             </g>;
           })}
           <g className={`graph-node enterprise-node ${selectedId === "enterprise" ? "is-selected" : ""}`} role="button" tabIndex={0} aria-label={`Select enterprise ${exampleSetup.enterprise.name}`} aria-pressed={selectedId === "enterprise"} onPointerDown={e => e.stopPropagation()} onClick={() => choose({ kind: "enterprise" }, enterprisePoint)} onKeyDown={e => nodeKey(e, { kind: "enterprise" }, enterprisePoint)}>
