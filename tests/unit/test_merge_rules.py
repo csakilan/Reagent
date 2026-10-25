@@ -14,6 +14,8 @@ from runtime.resolver import load_catalog, resolve_document
 from runtime.resolver.globs import is_subset, match
 
 _BASE = load_catalog()
+#: platform-eng's github repo scope in spec/examples (the live demo repo included).
+TEAM_REPOS = ["nmc2/infra", "nmc2/platform-api", "csakilan/reagent-demo"]
 
 
 @pytest.fixture
@@ -416,7 +418,7 @@ def test_omitted_resources_inherit_the_parent_scope(cat):
     a = agent(cat, "pr-reviewer")
     del a["spec"]["tools"][0]["resources"]
     doc = resolve(cat, a)
-    assert perm(doc, "github:pulls.read")["resources"] == {"repo": ["nmc2/infra", "nmc2/platform-api"]}
+    assert perm(doc, "github:pulls.read")["resources"] == {"repo": TEAM_REPOS}
 
 
 # =============================================================================
@@ -457,7 +459,7 @@ def test_d1_enterprise_agent_is_scoped_to_the_root_runs_team(cat):
     people = resolve(cat, s, root_team="people-ops")
     assert not any(t["connector"] == "github" for t in people["effective"]["tool_permissions"])
     plat = resolve(cat, s, root_team="platform-eng")
-    assert perm(plat, "github:pulls.read")["resources"] == {"repo": ["nmc2/infra", "nmc2/platform-api"]}
+    assert perm(plat, "github:pulls.read")["resources"] == {"repo": TEAM_REPOS}
 
 
 def test_d1_enterprise_agent_keeps_platform_connector(cat):

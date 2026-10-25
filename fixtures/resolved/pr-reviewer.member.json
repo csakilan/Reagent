@@ -41,7 +41,7 @@
         "source": "team:platform-eng"
       },
       {
-        "value": "Review the pull request. Read the diff with github:pulls.read.\nReport bugs, security issues and style problems. Check Terraform changes for public\nS3 buckets and open security groups. Before finishing, call agent:secret-scanner on the\ndiff and include its findings. Post the review with github:pulls.comment.",
+        "value": "Review the pull request. Read the diff with github:pulls.read.\nReport bugs, security issues and style problems. Check Terraform changes for public\nS3 buckets and open security groups. Before finishing, call agent:secret-scanner on the\ndiff and include its findings. You MUST finish by posting the full review with\ngithub:pulls.comment. Do not end with the review only in your answer.",
         "source": "agent"
       }
     ],
@@ -56,7 +56,8 @@
           "resources": {
             "repo": [
               "nmc2/infra",
-              "nmc2/platform-api"
+              "nmc2/platform-api",
+              "csakilan/reagent-demo"
             ]
           },
           "auth": "service"
@@ -168,7 +169,8 @@
           ],
           "repos": [
             "nmc2/infra",
-            "nmc2/platform-api"
+            "nmc2/platform-api",
+            "csakilan/reagent-demo"
           ]
         },
         "source": "agent"
@@ -340,7 +342,8 @@
         "resources": {
           "repo": [
             "nmc2/infra",
-            "nmc2/platform-api"
+            "nmc2/platform-api",
+            "csakilan/reagent-demo"
           ]
         },
         "auth": "service",
@@ -355,7 +358,8 @@
         "resources": {
           "repo": [
             "nmc2/infra",
-            "nmc2/platform-api"
+            "nmc2/platform-api",
+            "csakilan/reagent-demo"
           ]
         },
         "auth": "service",
@@ -453,7 +457,8 @@
         ],
         "repos": [
           "nmc2/infra",
-          "nmc2/platform-api"
+          "nmc2/platform-api",
+          "csakilan/reagent-demo"
         ]
       },
       {
