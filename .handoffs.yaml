@@ -37,7 +37,7 @@ handoffs:
       run_events.schema.json, connector_actions.json and errors.py; fakes/ and
       fixtures/ are populated; tests/contract/ runs and reports every seam.
     verify: "pytest tests/contract/test_contracts_selfcheck.py -q"
-    status: pending
+    status: "ready"
     deadline: "2026-10-25T03:00:00-05:00"
     fallback: "NONE. This blocks all four workflows. If it slips, wake a human."
 
