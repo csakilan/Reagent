@@ -1,12 +1,19 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap');
 
 :root { color-scheme: light; --background:#faf9f7; --surface:#f2f0ec; --line:#d8d5ce; --ink:#1a1a18; --muted:#696761; --enterprise:#2f4858; --team:#2d6a62; --agent:#9a6b1f; --denied:#8c3a2b; }
 * { box-sizing:border-box; }
-body { margin:0; background:var(--background); color:var(--ink); font-family:'IBM Plex Sans',Arial,sans-serif; }
+body { margin:0; background:var(--background); color:var(--ink); font-family:'Manrope',Arial,sans-serif; }
 button, input { font:inherit; }
 button { color:inherit; cursor:pointer; }
-.shell { min-height:100vh; display:grid; grid-template-columns:220px minmax(0,1fr); }
-.rail { border-right:1px solid var(--line); padding:24px 14px; display:flex; flex-direction:column; gap:28px; }
+.topbar { height:54px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:24px; padding:0 22px; position:relative; z-index:2; background:var(--background); }
+.topbar-brand { height:100%; display:flex; align-items:center; gap:10px; color:var(--ink); text-decoration:none; font-size:15px; font-weight:800; letter-spacing:-.04em; padding-right:22px; border-right:1px solid var(--line); }
+.topbar-brand img { object-fit:contain; }
+.topbar-context,.topbar-tools { display:flex; align-items:center; gap:12px; font-size:11px; color:var(--muted); }
+.topbar-tools { margin-left:auto; gap:16px; }
+.topbar-tools a { color:var(--muted); text-decoration:none; }
+.shell { min-height:calc(100vh - 54px); display:grid; grid-template-columns:220px minmax(0,1fr); }
+.rail { border-right:1px solid var(--line); padding:14px 12px; display:flex; flex-direction:column; gap:20px; }
+.rail .brand { display:none; }
 .brand { font-size:17px; font-weight:700; letter-spacing:-.03em; padding:0 12px; }
 .brand small { display:block; margin-top:4px; color:var(--muted); font:11px 'IBM Plex Mono',monospace; letter-spacing:0; }
 .nav { display:grid; gap:4px; }
@@ -14,7 +21,7 @@ button { color:inherit; cursor:pointer; }
 .nav a.active { color:var(--ink); background:var(--surface); font-weight:600; }
 .user-switch { margin-top:auto; padding:12px; border-top:1px solid var(--line); display:grid; gap:8px; font-size:12px; color:var(--muted); }
 .user-switch select { background:transparent; color:var(--ink); border:1px solid var(--line); padding:8px; border-radius:3px; }
-main { min-width:0; padding:62px clamp(22px,4vw,64px) 70px; }
+main { min-width:0; padding:34px clamp(22px,4vw,64px) 70px; }
 .page-head { display:flex; justify-content:space-between; align-items:flex-start; gap:18px; border-bottom:1px solid var(--line); padding-bottom:22px; margin-bottom:24px; }
 .eyebrow { color:var(--muted); text-transform:uppercase; letter-spacing:.12em; font:10px 'IBM Plex Mono',monospace; }
 h1 { font-size:26px; line-height:1.2; letter-spacing:-.035em; margin:7px 0 5px; font-weight:600; }
@@ -81,9 +88,8 @@ h1 { font-size:26px; line-height:1.2; letter-spacing:-.035em; margin:7px 0 5px; 
 .verdict.pass { color:var(--team); }.verdict.fail,.reject { color:var(--denied); }.verdict.pending { color:var(--agent); }
 .case-actions { display:flex;flex-wrap:wrap;align-content:start;gap:6px; }
 .case-editor { width:100%;min-height:120px;border:1px solid var(--line);background:transparent;padding:8px;font:10px 'IBM Plex Mono',monospace; }
-.global-user { position:fixed;right:12px;top:12px;z-index:10;background:var(--background);border:1px solid var(--line);display:flex;align-items:center;gap:8px;padding:0 8px; }
-.global-user .user-switch { margin:0;padding:6px 8px;border:0;display:flex;align-items:center;gap:8px;font:9px 'IBM Plex Mono',monospace; }
-.global-user select { padding:4px;border:0;font-size:11px; }
+.topbar-tools .user-switch { margin:0;padding:0;border:0;display:flex;align-items:center;gap:7px;font:9px 'IBM Plex Mono',monospace; }
+.topbar-tools select { padding:5px 7px;border:1px solid var(--line);font-size:11px; }
 .agent-grid,.approval-grid { grid-template-columns:1fr 1.5fr 1fr .8fr;align-items:start;font-size:12px; }
 .agent-grid p,.approval-grid p { margin:6px 0;color:var(--muted);font-size:11px; }
 .editor-frame { border:1px solid var(--line);min-height:400px; }
@@ -91,7 +97,7 @@ h1 { font-size:26px; line-height:1.2; letter-spacing:-.035em; margin:7px 0 5px; 
 .validation { margin-top:12px;padding:12px;border:1px solid var(--line);font-size:12px; }
 .validation-ok { color:var(--team); }.validation-error { color:var(--denied); }
 @media(max-width:900px) { .pipeline { overflow:auto;grid-template-columns:repeat(7,120px); }.case-grid { grid-template-columns:1fr 1fr; }.case-header { display:none; } }
-@media (max-width:760px) { .shell { grid-template-columns:1fr; } .rail { border-right:0;border-bottom:1px solid var(--line);padding:14px;gap:12px; } .nav { grid-template-columns:repeat(3,1fr); } .nav a { padding:8px;font-size:11px; } .user-switch { display:none; } main { padding:24px 14px 48px; } .resolved-head,.policy-row { grid-template-columns:112px minmax(0,1fr); } .gutter { padding:8px; } .chain { margin-left:120px; } .toolbar { flex-wrap:wrap; justify-content:flex-end; } }
+@media (max-width:760px) { .topbar { padding:0 12px; gap:12px; }.topbar-context { display:none; }.topbar-tools { gap:8px; }.topbar-tools .user-switch { display:none; }.shell { grid-template-columns:1fr; } .rail { border-right:0;border-bottom:1px solid var(--line);padding:10px 12px;gap:12px; } .nav { grid-template-columns:repeat(3,1fr); } .nav a { padding:8px;font-size:11px; } .user-switch { display:none; } main { padding:24px 14px 48px; } .resolved-head,.policy-row { grid-template-columns:112px minmax(0,1fr); } .gutter { padding:8px; } .chain { margin-left:120px; } .toolbar { flex-wrap:wrap; justify-content:flex-end; } }
 .privacy-page { max-width:780px;margin:0 auto;line-height:1.7; }
 .privacy-page h2 { margin-top:28px;font-size:17px; }
 .privacy-page p { color:var(--muted);font-size:14px; }
