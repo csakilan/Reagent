@@ -95,7 +95,7 @@ handoffs:
       and writes one runs row plus ordered run_events rows that validate against
       contracts/run_events.schema.json.
     verify: "pytest tests/contract/test_run_lifecycle.py -q"
-    status: pending
+    status: "ready"
     deadline: "2026-10-25T06:30:00-05:00"
     fallback: "fixtures/traces/*.json for the dashboard; the eval engine grades recorded traces instead of live runs."
 
