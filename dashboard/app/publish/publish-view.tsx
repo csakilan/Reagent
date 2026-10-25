@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { abandonPublish, call, continuePublish, dryRunCase, listAgents, publishRun, reviewCase, startPublish, type AgentSummary, type EvalReport, type PublishRun, type Rejection } from "../../lib/api";
+import { abandonPublish, call, continuePublish, costCheck, type CostCheck, dryRunCase, listAgents, publishRun, reviewCase, startPublish, type AgentSummary, type EvalReport, type PublishRun, type Rejection } from "../../lib/api";
 import { recordedAgents, recordedPublishRun } from "../../lib/fixtures";
 import { useDemoUser, useLive } from "../../lib/live";
 import { Failure, Icon, PageHead, Payload, Rejections, Skeleton, SourceTag, Verdict, pct, usd, when } from "../ui";
@@ -133,6 +133,35 @@ function ResultCase({ item }: { item: ReportCase }) {
   </details>;
 }
 
+/** cost-optimizer, triggered from a pipeline whose evals have run. */
+function CostOptimizer({ runId }: { runId: number }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<CostCheck | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  async function check() {
+    setBusy(true); setProblem(null);
+    const outcome = await call<CostCheck>(costCheck(runId));
+    setBusy(false);
+    if (outcome.ok) setResult(outcome.data); else setProblem(outcome.detail);
+  }
+  return <div className="ci-callout">
+    <p><b>Could a cheaper model pass the same tests?</b> cost-optimizer re-runs these approved cases on every other model your team allows and recommends the cheapest one that still clears the gate.</p>
+    <div className="toolbar"><button className="button" type="button" disabled={busy} onClick={check}>{busy ? "cost-optimizer is comparing models…" : "Compare cheaper models"}</button></div>
+    {problem && <div className="notice notice-denied">{problem}</div>}
+    {result && <>
+      <div className="table compact-table">
+        <div className="table-head"><span>Model</span><span>Pass rate</span><span>Cost per run</span><span>Gate</span></div>
+        {result.options.map(o => <div className="table-row" key={o.model}>
+          <span><code>{o.model}</code>{o.current ? <small>current</small> : null}</span>
+          <span className="num">{pct(o.pass_rate)}</span><span className="num">{usd(o.avg_cost)}</span>
+          <span>{o.gate_blocked ? <Verdict kind="fail">blocked</Verdict> : <Verdict kind="pass">clears</Verdict>}</span>
+        </div>)}
+      </div>
+      <p><b>{result.advice}</b></p>
+    </>}
+  </div>;
+}
+
 function StepBody({ step, run, results, children }: { step: Step; run: Run; results: Results; children?: ReactNode }) {
   const res = results[step.stage] ?? {};
   return <div className="ci-detail">
@@ -214,6 +243,7 @@ function RunReview({ runId }: { runId: number }) {
             {step.stage === "evals" && run.report && <>
               <p className="ci-metrics">Pass rate <b>{pct(run.report.pass_rate)}</b> (95% interval {pct(run.report.pass_rate_ci_low)} to {pct(run.report.pass_rate_ci_high)}) · safety <b>{pct(run.report.safety_pass_rate)}</b> · {usd(run.report.avg_cost)} per run · {run.report.runs_per_case ?? "?"} run{run.report.runs_per_case === 1 ? "" : "s"} per case · judge {run.report.judge_calibrated ? "calibrated" : "uncalibrated, not gating"}</p>
               <div className="ci-items">{((run.report.cases ?? []) as ReportCase[]).map(item => <ResultCase key={item.case_id} item={item} />)}</div>
+              <CostOptimizer runId={runId} />
             </>}
           </StepBody>
         </details>

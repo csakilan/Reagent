@@ -949,6 +949,50 @@ async def get_run_triage(run_id: int, x_reagent_user: str | None = Header(defaul
     return triage(run, trace)
 
 
+@router.post("/publish-runs/{run_id}/cost-check", tags=["publish"])
+def post_cost_check(run_id: int, x_reagent_user: str | None = Header(default=None)):
+    """cost-optimizer, triggered from a pipeline whose evals have run (SPEC.md §10).
+
+    Re-runs the same approved cases on every other model the team allows and
+    recommends the cheapest one that still clears the gate. It proposes; the
+    author changes model.id and publishes again. Not in openapi.yaml yet."""
+    from runtime.evals import run_evals
+    cat = load_catalog()
+    run = _run_for(run_id, cat, x_reagent_user)
+    if not run.get("report"):
+        raise HTTPException(409, "evals have not run in this pipeline yet")
+    user, _, _ = _principal(cat, x_reagent_user)
+    draft = copy.deepcopy(run["draft"])
+    kept = [c["_case"] for c in run["cases"] if c.get("decision") in ("approved", "edited") and c["origin"] != "inherited"]
+    draft["spec"].setdefault("evaluation", {})["cases"] = kept
+    team = draft["metadata"].get("team")
+    allowed = get_team_grants(team, x_reagent_user=user)["models"] if team else sorted(cat.models)
+    current = draft["spec"]["model"]["id"]
+    runs = int(os.environ.get("REAGENT_PIPELINE_RUNS_PER_CASE") or 1)
+    base = run["report"]
+    options = [{"model": current, "pass_rate": base["pass_rate"], "avg_cost": base["avg_cost"],
+                "gate_blocked": base["gate_blocked"], "current": True}]
+    for model in allowed:
+        if model == current:
+            continue
+        rep = run_evals(run["agent"], runs, draft=draft, catalog=cat, caller=user,
+                        overrides={"spec": {"model": {"id": model}}})
+        options.append({"model": model, "pass_rate": rep["pass_rate"], "avg_cost": rep["avg_cost"],
+                        "gate_blocked": rep["gate_blocked"], "current": False})
+    passing = [o for o in options if not o["gate_blocked"]]
+    best = min(passing, key=lambda o: (o["avg_cost"], -o["pass_rate"])) if passing else None
+    if best is None:
+        advice = "No allowed model clears the gate on these tests yet."
+    elif best["current"] or best["avg_cost"] >= options[0]["avg_cost"]:
+        advice = f"Keep {current}: no cheaper allowed model clears the gate."
+    else:
+        saving = 1 - best["avg_cost"] / options[0]["avg_cost"] if options[0]["avg_cost"] else 0
+        advice = (f"Switch model.id to {best['model']}: it clears the gate at "
+                  f"${best['avg_cost']:.4f} a run, {saving:.0%} cheaper than {current}.")
+    return {"by": "cost-optimizer", "runs_per_case": runs, "options": options,
+            "recommendation": best["model"] if best else None, "advice": advice}
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="ReAgent agents (wf/resolver)")
     app.include_router(router)

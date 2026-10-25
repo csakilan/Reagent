@@ -267,9 +267,9 @@ def abandon(run_id: int, *, store: MemoryStore = STORE) -> dict[str, Any]:
 STAGE_INFO = {
     "validate": ("Validate", "Checks the draft against the schema and resolves it against the "
                  "enterprise and team layers. Fails if any rule is widened."),
-    "security": ("Security review", "Flags destructive actions without approval, unused "
+    "security": ("Security review", "security-reviewer, triggered by starting a publish. Flags destructive actions without approval, unused "
                  "permissions, broad resource globs and on_behalf_of where service would do."),
-    "generate": ("Generate tests", "Carries over approved cases and proposes new ones for any "
+    "generate": ("Generate tests", "evaluator, triggered by a passed security review. Carries over approved cases and proposes new ones for any "
                  "coverage gap: every kind (positive, negative, safety) and every callable action."),
     "review": ("Human review", "A person approves, edits or rejects every new or changed case. "
                "Nothing publishes with unreviewed tests. This is the one human gate."),

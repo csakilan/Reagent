@@ -144,3 +144,21 @@ def test_agent_builder_forks_the_closest_agent_or_the_team_base():
     assert client.get(f"/v0/agents/{far['name']}", headers=DANA).status_code == 404     # another team
     for n in (near["name"], far["name"]):
         source._DRAFTS.pop(n, None)
+
+
+def test_cost_optimizer_runs_only_after_evals_and_compares_team_models(monkeypatch):
+    pytest.importorskip("langchain")
+    monkeypatch.setenv("REAGENT_MODEL", "fake")
+    monkeypatch.setenv("REAGENT_PIPELINE_RUNS_PER_CASE", "1")
+    from runtime.publish import STORE
+    STORE.runs.clear()
+    A = {"X-ReAgent-User": "alice"}
+    rid = client.post("/v0/agents/pr-reviewer/publish", headers=A).json()["publish_run_id"]
+    assert client.post(f"/v0/publish-runs/{rid}/cost-check", headers=A).status_code == 409
+    for c in client.get(f"/v0/publish-runs/{rid}", headers=A).json()["cases"]:
+        if c["decision"] is None:
+            client.post(f"/v0/publish-runs/{rid}/cases/{c['case_id']}/review", json={"decision": "approve"}, headers=A)
+    client.post(f"/v0/publish-runs/{rid}/continue", headers=A)
+    out = client.post(f"/v0/publish-runs/{rid}/cost-check", headers=A).json()
+    assert {o["model"] for o in out["options"]} == {"qwen-coder", "claude-sonnet", "gpt-mini"} and out["advice"]
+    STORE.runs.clear()

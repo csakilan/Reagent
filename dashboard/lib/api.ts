@@ -145,3 +145,7 @@ export const buildAgent = (request: string, team?: string) => untyped("POST", "/
 /** failure-triage: why a failed or denied run failed, and what to change. */
 export type Triage = { run_id: number; status: string; failed: boolean; code?: string | null; cause?: string; explanation?: string; fix?: string; evidence?: string[] };
 export const runTriage = (id: number) => untyped("GET", `/v0/runs/${id}/triage`);
+
+/** cost-optimizer: the same approved tests on the team's other models; cheapest that passes. */
+export type CostCheck = { advice: string; recommendation: string | null; runs_per_case: number; options: { model: string; pass_rate: number; avg_cost: number; gate_blocked: boolean; current: boolean }[] };
+export const costCheck = (id: number) => untyped("POST", `/v0/publish-runs/${id}/cost-check`);
