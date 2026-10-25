@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { call, listAgents, runResult, startRun, traceForRun, type AgentSummary, type Rejection, type RunEvent, type RunResult, type Trace } from "../../lib/api";
-import { RECORDED_RUN_ID, recordedAgents, recordedRun, recordedTrace } from "../../lib/fixtures";
+import { recordedAgents, recordedRun, recordedTrace } from "../../lib/fixtures";
 import { useDemoUser, useLive } from "../../lib/live";
 import { Failure, Icon, KeyValues, PageHead, Payload, Rejections, Skeleton, SourceTag, Verdict, usd } from "../ui";
 
@@ -142,7 +142,6 @@ function RunForm({ initialAgent }: { initialAgent: string }) {
         <input className="input" inputMode="numeric" placeholder="Run id" value={runId} onChange={event => setRunId(event.target.value.replace(/\D/g, ""))} aria-label="Run id" />
         <button className="button" type="submit">Open</button>
       </form>
-      <Link className="text-link" href={`/traces?run=${RECORDED_RUN_ID}`}>Open run {RECORDED_RUN_ID}</Link>
     </section>
   </div>;
 }

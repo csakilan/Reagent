@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { abandonPublish, call, continuePublish, dryRunCase, listAgents, publishRun, reviewCase, startPublish, type AgentSummary, type EvalReport, type PublishRun, type Rejection } from "../../lib/api";
-import { RECORDED_PUBLISH_RUN_ID, recordedAgents, recordedPublishRun } from "../../lib/fixtures";
+import { recordedAgents, recordedPublishRun } from "../../lib/fixtures";
 import { useDemoUser, useLive } from "../../lib/live";
 import { Failure, Icon, PageHead, Payload, Rejections, Skeleton, SourceTag, Verdict, pct, usd, when } from "../ui";
 
@@ -267,7 +267,6 @@ function StartForm() {
         <input className="input" inputMode="numeric" placeholder="Pipeline id" value={runId} onChange={event => setRunId(event.target.value.replace(/\D/g, ""))} aria-label="Pipeline id" />
         <button className="button" type="submit">Open</button>
       </form>
-      <Link className="text-link" href={`/publish?run=${RECORDED_PUBLISH_RUN_ID}`}>Open recorded pipeline {RECORDED_PUBLISH_RUN_ID}</Link>
     </section>
   </div>;
 }

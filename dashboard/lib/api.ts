@@ -117,3 +117,5 @@ export const teamGrants = (team: string) => untyped("GET", `/v0/teams/${encodeUR
 export const teamBase = (team: string) => `team:${team}`;
 /** Frees an agent for a new pipeline (FROZEN D17 allows one running per agent). */
 export const abandonPublish = (id: number) => untyped("POST", `/v0/publish-runs/${id}/abandon`);
+/** Enterprise → teams → agents, filtered per caller on the server (SPEC.md §2). */
+export const hierarchy = () => untyped("GET", "/v0/hierarchy");

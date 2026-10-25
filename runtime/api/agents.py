@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse
 
 from contracts.errors import Code, ReAgentError, Rejection
 from runtime.resolver import load_catalog, resolve_agent
-from runtime.resolver.source import Catalog
+from runtime.resolver.source import Catalog, semver_key
 from runtime.resolver.validate import validate_draft_text
 
 # ONE router for every wf/resolver route: the runtime app mounts `router` and
@@ -48,6 +48,185 @@ def _visible(doc: dict[str, Any], is_admin: bool, team: str | None) -> bool:
         return True
     md = doc["metadata"]
     return md.get("level") == "team" and md.get("team") == team
+
+
+def _status(doc: dict[str, Any]) -> str:
+    """Lifecycle lives in the database (SPEC.md §12). From files: platform agents are
+    seeded published (FROZEN D8), every team agent is a draft until it publishes."""
+    return doc.get("_status") or ("published" if doc["metadata"].get("level") == "enterprise" else "draft")
+
+
+def _summary(doc: dict[str, Any]) -> dict[str, Any]:
+    md, spec = doc["metadata"], doc.get("spec", {})
+    uc = spec.get("use_case") or {}
+    return {"name": md["name"], "version": str(md.get("version", "0.0.0")), "status": _status(doc),
+            "team": md.get("team"), "description": uc.get("description", ""),
+            "desired_outcome": uc.get("desired_outcome"), "tags": md.get("tags", []),
+            "forked_from": md.get("forked_from"), "update_available": False,
+            "pass_rate": None, "production_success_rate": None, "avg_cost_usd": None}
+
+
+@router.get("/agents")
+def get_agents(q: str | None = None, tag: str | None = None,
+               x_reagent_user: str | None = Header(default=None)):
+    """The caller's collection, filtered SERVER-side (SPEC.md §2): a member sees only
+    their own team's agents, never enterprise-level ones. Admins see everything."""
+    cat = load_catalog()
+    _, is_admin, team = _principal(cat, x_reagent_user)
+    out = []
+    for name in sorted(cat.agents):
+        doc = cat.latest(name)
+        if doc is None or not _visible(doc, is_admin, team):
+            continue
+        item = _summary(doc)
+        if tag and tag not in item["tags"]:
+            continue
+        if q:
+            hay = " ".join([item["name"], item["description"], item["desired_outcome"] or "",
+                            " ".join(item["tags"])]).lower()
+            if not all(w in hay for w in q.lower().split()):
+                continue
+        out.append(item)
+    if q:   # SPEC.md §2 search: matches on the desired outcome rank first
+        out.sort(key=lambda a: (q.lower() not in (a["desired_outcome"] or "").lower(), a["name"]))
+    return {"agents": out}
+
+
+@router.get("/agents/{name}")
+def get_agent(name: str, x_reagent_user: str | None = Header(default=None)):
+    cat = load_catalog()
+    _, is_admin, team = _principal(cat, x_reagent_user)
+    doc = cat.latest(name)
+    if doc is None or not _visible(doc, is_admin, team):
+        raise HTTPException(404, "not found")       # deliberately indistinguishable
+    versions = [{"version": v, "status": _status(d), "published_at": None, "published_by": None}
+                for v, d in sorted(cat.agent_versions(name).items(), key=lambda kv: semver_key(kv[0]))]
+    clean = {k: v for k, v in doc.items() if not k.startswith("_")}
+    return {**_summary(doc), "level": doc["metadata"].get("level", "team"),
+            "spec_yaml": yaml.safe_dump(clean, sort_keys=False), "versions": versions}
+
+
+def _grant_line(name: str, g: dict[str, Any]) -> str:
+    parts = [f"{name}: {', '.join(g.get('allow', ['*']))}"]
+    if g.get("deny"):
+        parts.append("deny " + ", ".join(g["deny"]))
+    for k, v in (g.get("resources") or {}).items():
+        parts.append(f"{k} {', '.join(v)}")
+    return "; ".join(parts)
+
+
+def _guardrail_lines(g: dict[str, Any]) -> list[str]:
+    out = []
+    red = g.get("redaction") or {}
+    if red.get("secrets"):
+        out.append("secret redaction required")
+    if red.get("pii"):
+        out.append("PII redaction required")
+    appr = g.get("approval") or {}
+    if appr.get("require_for_risk"):
+        out.append("approval required for " + " and ".join(appr["require_for_risk"]) + " risk"
+                   + (f" ({appr['timeout_minutes']} minute timeout)" if appr.get("timeout_minutes") else ""))
+    if appr.get("actions"):
+        out.append("approval required for " + ", ".join(appr["actions"]))
+    if g.get("audit_log"):
+        out.append("audit log enabled")
+    if g.get("deny"):
+        out.append("never: " + ", ".join(g["deny"]))
+    return out
+
+
+def _bucket_line(b: dict[str, Any]) -> str:
+    return (f"{b['name']}: {b['type']} · read {', '.join(b.get('read', []))} · "
+            f"write {', '.join(b.get('write', []) or ['runtime only'])}")
+
+
+def _agent_node(doc: dict[str, Any]) -> dict[str, Any]:
+    spec, md = doc.get("spec", {}), doc["metadata"]
+    model = spec.get("model") or {}
+    b = spec.get("budget") or {}
+    tools = [f"{t['connector']}:{a}" for t in spec.get("tools") or [] for a in t["actions"]]
+    tools += [f"agent:{s['ref'].partition('@')[0]}" for s in spec.get("sub_agents") or []]
+    ev = spec.get("evaluation") or {}
+    cases = ev.get("cases") or []
+    budget = [f"${b['usd_per_run']} / run" if "usd_per_run" in b else "",
+              f"{b['max_steps']} steps" if "max_steps" in b else "",
+              f"{b['timeout_seconds']}s" if "timeout_seconds" in b else ""]
+    thresholds = ev.get("thresholds") or {}
+    evaluation = [f"{ev['runs_per_case']} runs per case" if "runs_per_case" in ev else "",
+                  f"pass rate ≥ {thresholds['pass_rate']:.2f}" if "pass_rate" in thresholds else "",
+                  (f"{len(cases)} cases: " + ", ".join(sorted({c.get('kind', 'positive') for c in cases})))
+                  if cases else "no cases yet"]
+    metrics = (spec.get("observability") or {}).get("metrics") or []
+    return {
+        "name": md["name"], "version": str(md.get("version", "")), "model": model.get("id"),
+        "fallback": model.get("fallback"), "tools": tools,
+        "resources": sorted({f"{k}: {', '.join(v)}" for t in spec.get("tools") or []
+                             for k, v in (t.get("resources") or {}).items()}),
+        "budget": " · ".join(x for x in budget if x) or "inherits the team's limits",
+        "purpose": (spec.get("use_case") or {}).get("description", ""),
+        "prompt": ((spec.get("prompt") or {}).get("task") or "").strip(),
+        "memory": [f"{m['bucket']}: {m['mode']}" for m in spec.get("memory") or []],
+        "evaluation": [x for x in evaluation if x],
+        "triggers": [t["type"] + (f" ({', '.join(t.get('events', []))})" if t.get("events") else "")
+                     for t in spec.get("triggers") or []],
+        "guardrails": _guardrail_lines(spec.get("guardrails") or {}),
+        "observability": [f"metrics: {', '.join(metrics)}"] if metrics else [],
+        "source": f"{md.get('team') or 'enterprise'}/{md['name']}@{md.get('version', '')}",
+    }
+
+
+@router.get("/hierarchy")
+def get_hierarchy(x_reagent_user: str | None = Header(default=None)):
+    """Enterprise → teams → agents, built per caller on the server. SPEC.md §2: a
+    member never receives the enterprise layer, another team, or enterprise-level
+    agents; they are absent from the response, not hidden by the client.
+    Not in contracts/openapi.yaml yet (reported)."""
+    cat = load_catalog()
+    user, is_admin, team = _principal(cat, x_reagent_user)
+    ent = cat.ent
+    if is_admin:
+        evl = ent.get("evaluation") or {}
+        judge = evl.get("judge") or {}
+        req = evl.get("requirements") or {}
+        enterprise = {
+            "name": cat.enterprise_name, "locked": False, "admins": ent.get("admins", []),
+            "description": cat.enterprise["metadata"].get("description", ""),
+            "prompt": (ent.get("prompt") or "").strip(), "models": ent.get("models") or {},
+            "connectors": [_grant_line(n, g) for n, g in (ent.get("connectors") or {}).items()],
+            "triggers": (ent.get("triggers") or {}).get("allow", []),
+            "guardrails": _guardrail_lines(ent.get("guardrails") or {}), "limits": ent.get("limits") or {},
+            "evaluation": {"judge_model": judge.get("model"), "votes": judge.get("votes"),
+                           "min_agreement": judge.get("min_agreement"),
+                           "min_cases": ", ".join(f"{v} {k}" for k, v in (req.get("min_cases") or {}).items()),
+                           "tool_coverage": bool(req.get("tool_coverage"))},
+            "memory": [_bucket_line(b) for b in (ent.get("memory") or {}).get("buckets") or []],
+            "trace_retention_days": (ent.get("observability") or {}).get("log_retention_days"),
+            "agents": [_agent_node(cat.latest(n)) for n in sorted(cat.agents)
+                       if cat.latest(n)["metadata"].get("level") == "enterprise"],
+        }
+    else:
+        enterprise = {"name": cat.enterprise_name, "locked": True,
+                      "description": "Set by enterprise admins. Members never see the enterprise layer; "
+                                     "its rules still apply to every agent below it."}
+    teams = []
+    for tname in sorted(cat.teams):
+        if not (is_admin or tname == team):
+            continue
+        t = cat.team(tname) or {}
+        teams.append({
+            "name": tname, "description": cat.teams[tname]["metadata"].get("description", ""),
+            "source": f"team:{tname}", "members": t.get("members", []), "approvers": t.get("approvers", []),
+            "prompt": (t.get("prompt") or "").strip(),
+            "models": t.get("models") or {"allow": ["inherits the enterprise's"]},
+            "connectors": [_grant_line(n, g) for n, g in (t.get("connectors") or {}).items()],
+            "guardrails": _guardrail_lines(t.get("guardrails") or {}), "limits": t.get("limits") or {},
+            "memory": [_bucket_line(b) for b in (t.get("memory") or {}).get("buckets") or []],
+            "agents": [_agent_node(cat.latest(n)) for n in sorted(cat.agents)
+                       if cat.latest(n)["metadata"].get("team") == tname],
+        })
+    return {"label": f"{cat.enterprise_name} · as seen by {user}",
+            "viewer": {"user": user, "team": team, "is_enterprise_admin": is_admin},
+            "enterprise": enterprise, "teams": teams}
 
 
 @router.get("/agents/{name}/resolved")

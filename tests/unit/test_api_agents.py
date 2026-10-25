@@ -158,3 +158,31 @@ def test_new_agent_preview_routes():
     assert "csakilan/reagent-demo" in gh["resources"]["repo"]
     assert client.get("/v0/teams/people-ops/grants", headers=H).status_code == 404
     assert client.get("/v0/agents/team:people-ops/resolved", headers=H).status_code == 404
+
+
+def test_hierarchy_is_filtered_per_caller_on_the_server():
+    """SPEC.md §2. Bob (platform-eng) must not receive people-ops or the enterprise
+    layer at all: not hidden by the client, absent from the response."""
+    bob = client.get("/v0/hierarchy", headers={"X-ReAgent-User": "bob"}).json()
+    blob = json.dumps(bob)
+    assert [t["name"] for t in bob["teams"]] == ["platform-eng"]
+    assert bob["enterprise"]["locked"] is True and "prompt" not in bob["enterprise"]
+    assert "people-ops" not in blob and "handbook" not in blob
+    assert "untrusted data" not in blob                       # the enterprise prompt
+    assert {a["name"] for a in bob["teams"][0]["agents"]} == {"code-reviewer", "pr-reviewer"}
+    frank = client.get("/v0/hierarchy", headers={"X-ReAgent-User": "frank"}).json()
+    assert {t["name"] for t in frank["teams"]} >= {"platform-eng", "people-ops"}
+    assert frank["enterprise"]["locked"] is False and frank["enterprise"]["prompt"]
+
+
+def test_collection_and_detail_are_filtered_per_caller():
+    names = lambda who, q="": [a["name"] for a in client.get(
+        f"/v0/agents{'?q=' + q if q else ''}", headers={"X-ReAgent-User": who}).json()["agents"]]
+    assert names("bob") == ["code-reviewer", "pr-reviewer"]
+    assert names("dana") == ["people-ops-bot"]
+    assert "secret-scanner" in names("frank")
+    assert names("bob", "secrets") == ["pr-reviewer"]
+    assert client.get("/v0/agents/people-ops-bot", headers={"X-ReAgent-User": "bob"}).status_code == 404
+    assert client.get("/v0/agents/secret-scanner", headers={"X-ReAgent-User": "bob"}).status_code == 404
+    d = client.get("/v0/agents/pr-reviewer", headers={"X-ReAgent-User": "bob"}).json()
+    assert d["status"] == "draft" and "kind: Agent" in d["spec_yaml"]
