@@ -1,0 +1,877 @@
+openapi: 3.1.0
+info:
+  title: ReAgent runtime API
+  version: 0.0.0
+  description: |
+    FROZEN CONTRACT. Every route in SPEC.md §14.
+
+    wf/dashboard GENERATES its typed client from this file. wf/runtime and
+    wf/resolver implement it. A hand-written fetch call drifts the moment a route
+    changes, and that drift surfaces at 09:00 when there is no time to fix it.
+
+    TWO CHANGES FROM SPEC.md §14, both from the audit:
+
+    1. `POST /v0/agents/{name}/runs` does NOT take a `user` field. SPEC.md
+       defines the body as `{input, user}`, which lets any caller post
+       `{"user":"alice"}` and borrow alice's token scope through an
+       `on_behalf_of` tool. The acting principal comes only from the session
+       token. See FROZEN D2.
+
+    2. Every list and get is filtered by the caller's team server-side. The
+       dashboard renders what comes back and performs no filtering of its own,
+       because a client-side filter is not a visibility boundary.
+
+    AUTH for the demo is a log-in-as header, not real authentication. Roles ARE
+    enforced server-side; identity is not. SPEC.md §16 lists SSO as out of scope.
+servers:
+  - url: http://localhost:8000
+    description: local runtime
+
+security:
+  - demoUser: []
+
+tags:
+  - name: runs
+  - name: agents
+  - name: publish
+  - name: approvals
+  - name: admin
+  - name: meta
+
+paths:
+  /v0/agents:
+    get:
+      tags: [agents]
+      summary: Search the caller's team collection
+      description: |
+        Filtered to the caller's team. A member never sees another team's agents,
+        enterprise-level agents, or `access: private` agents. Ranking is on
+        desired outcome plus measured results, not description alone.
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: tag, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: matching agents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agents]
+                properties:
+                  agents:
+                    type: array
+                    items: { $ref: '#/components/schemas/AgentSummary' }
+
+  /v0/agents/{name}:
+    get:
+      tags: [agents]
+      parameters: [{ $ref: '#/components/parameters/name' }]
+      responses:
+        '200':
+          description: agent with its version history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v0/agents/{name}/resolved:
+    get:
+      tags: [agents]
+      summary: The resolved view, every value tagged by source layer
+      description: |
+        Team agents only. Enterprise-level agent configs are never returned to a
+        member. When the caller is not an enterprise admin, every leaf sourced at
+        `enterprise` arrives with `value: null` and `redacted: true`, and
+        `effective.prompt` is null. The response validates against
+        contracts/resolved_spec.schema.json.
+      parameters: [{ $ref: '#/components/parameters/name' }]
+      responses:
+        '200':
+          description: resolved spec
+          content:
+            application/json:
+              schema: { $ref: 'resolved_spec.schema.json' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: the agent does not resolve. `rejections` names the field and blocking layer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RejectionList' }
+
+  /v0/agents/{name}/runs:
+    post:
+      tags: [runs]
+      summary: Run an agent
+      description: |
+        The body carries `input` only. There is NO `user` field; the acting
+        principal comes from the session token. See FROZEN D2.
+      parameters: [{ $ref: '#/components/parameters/name' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [input]
+              additionalProperties: false
+              properties:
+                input:
+                  type: object
+                  description: Per-run data, validated against the agent's `input` schema.
+                wait:
+                  type: boolean
+                  default: false
+                  description: When true, block and return the result. When false, return a run id.
+      responses:
+        '202':
+          description: accepted, running
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+        '200':
+          description: finished (wait=true)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunResult' }
+        '402':
+          description: a budget is exhausted at some layer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RejectionList' }
+        '422': { $ref: '#/components/responses/Unresolvable' }
+
+  /v0/runs/{id}:
+    get:
+      tags: [runs]
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      responses:
+        '200':
+          description: status, output, cost
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunResult' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v0/runs/{id}/trace:
+    get:
+      tags: [runs]
+      summary: Redacted trace spans
+      description: |
+        Ordered by `seq`, not by timestamp, because two events can share a
+        timestamp. Events validate against contracts/run_events.schema.json.
+        Payloads are redacted before storage, so there is nothing to redact here.
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      responses:
+        '200':
+          description: trace
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, events]
+                properties:
+                  run_id: { type: integer }
+                  children:
+                    type: array
+                    description: Sub-agent run ids, nested under this one.
+                    items: { type: integer }
+                  events:
+                    type: array
+                    items: { $ref: 'run_events.schema.json' }
+
+  /v0/agents/{name}/validate:
+    post:
+      tags: [agents]
+      summary: Validate a draft without saving it
+      description: Powers the inline errors in the Monaco editor.
+      parameters: [{ $ref: '#/components/parameters/name' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [spec]
+              properties:
+                spec: { type: string, description: The raw YAML of the .agent file. }
+      responses:
+        '200':
+          description: valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                  rejections:
+                    type: array
+                    items: { $ref: '#/components/schemas/Rejection' }
+
+  /v0/agents/{name}/evals:
+    post:
+      tags: [agents]
+      summary: Run the eval suite
+      parameters: [{ $ref: '#/components/parameters/name' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                runs_per_case: { type: integer, default: 5, minimum: 1 }
+                mutants:
+                  type: boolean
+                  default: false
+                  description: Generate deliberately broken variants and report the mutation score.
+      responses:
+        '200':
+          description: eval report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvalReport' }
+
+  /v0/agents/{name}/fork:
+    post:
+      tags: [agents]
+      summary: Fork into the caller's team
+      description: 'Records `forked_from: <name>@<exact version>`. Ranges are not accepted.'
+      parameters: [{ $ref: '#/components/parameters/name' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_name]
+              properties:
+                new_name: { type: string, pattern: '^[a-z0-9-]+$' }
+      responses:
+        '201':
+          description: forked draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentDetail' }
+
+  /v0/agents/{name}/publish:
+    post:
+      tags: [publish]
+      summary: Start a publish pipeline run
+      description: |
+        Starts a PIPELINE, not a publish. Returns its id. At most one pipeline
+        may be running per agent; a second attempt is 409.
+      parameters: [{ $ref: '#/components/parameters/name' }]
+      responses:
+        '202':
+          description: pipeline started
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [publish_run_id]
+                properties:
+                  publish_run_id: { type: integer }
+                  review_url: { type: string }
+        '409':
+          description: a pipeline is already running for this agent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RejectionList' }
+
+  /v0/publish-runs/{id}:
+    get:
+      tags: [publish]
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      responses:
+        '200':
+          description: stage status, logs, generated cases, review state, eval report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublishRun' }
+
+  /v0/publish-runs/{id}/cases/{case}/review:
+    post:
+      tags: [publish]
+      summary: Approve, edit or reject one generated case
+      description: |
+        `case` is the scoped identity `<scope>/<name>` where scope is `agent`,
+        `enterprise` or `team:<name>`, because a bare name collides with
+        inherited default_cases. The server computes `case_hash`; never send one.
+      parameters:
+        - { $ref: '#/components/parameters/id' }
+        - { name: case, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { enum: [approve, edit, reject] }
+                edited_case: { type: object }
+                reason:
+                  type: string
+                  description: Required on reject. Fed back to the evaluator so it does not re-propose it.
+      responses:
+        '200': { description: recorded }
+
+  /v0/publish-runs/{id}/cases/{case}/dry-run:
+    post:
+      tags: [publish]
+      summary: Run one case once so the reviewer sees real agent output
+      parameters:
+        - { $ref: '#/components/parameters/id' }
+        - { name: case, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: redacted output
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output: { type: object }
+                  tool_calls: { type: array, items: { type: string } }
+                  passed: { type: boolean }
+                  cost_usd: { type: number }
+
+  /v0/publish-runs/{id}/continue:
+    post:
+      tags: [publish]
+      summary: Continue to evals once every case is reviewed
+      description: Refused with E_UNREVIEWED_CASES otherwise. Nothing publishes with unreviewed tests.
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      responses:
+        '202': { description: continuing }
+        '409':
+          description: cases remain unreviewed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RejectionList' }
+
+  /v0/approvals:
+    get:
+      tags: [approvals]
+      summary: The human-in-the-loop queue
+      description: Filtered to teams the caller is an approver for.
+      parameters:
+        - { name: status, in: query, schema: { enum: [pending, decided, all], default: pending } }
+      responses:
+        '200':
+          description: queue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approvals:
+                    type: array
+                    items: { $ref: '#/components/schemas/Approval' }
+
+  /v0/approvals/{id}:
+    post:
+      tags: [approvals]
+      summary: Decide an approval, which resumes or fails the paused run
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  enum: [approved, rejected]
+                  description: '`expired` is set by the platform on timeout, never by a caller.'
+      responses:
+        '200':
+          description: decided; carries the resumed run's outcome
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunResult' }
+        '410':
+          description: the approval already expired, so the action was denied and the run failed
+
+  /v0/meta-agents:
+    get:
+      tags: [meta]
+      summary: List runnable meta-agents
+      description: Names and descriptions only. Configs are never returned to a non-admin.
+      responses:
+        '200':
+          description: meta-agents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  meta_agents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        description: { type: string }
+
+  /v0/meta-agents/{name}/runs:
+    post:
+      tags: [meta]
+      summary: Run a meta-agent, scoped to the caller's team
+      description: |
+        Charged to the CALLER'S team aggregate and capped by
+        min(meta-agent budget, caller's team remaining). See FROZEN D20.
+      parameters: [{ $ref: '#/components/parameters/name' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [input]
+              properties:
+                input: { type: object }
+      responses:
+        '202':
+          description: accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+
+  /v0/connector-requests:
+    post:
+      tags: [agents]
+      summary: Request a connector the team does not have
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description]
+              properties:
+                description: { type: string }
+      responses:
+        '201': { description: requested }
+    get:
+      tags: [agents]
+      responses:
+        '200':
+          description: requests visible to the caller
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requests: { type: array, items: { type: object } }
+
+  /v0/admin/registry:
+    post:
+      tags: [admin]
+      summary: Add a connector or model
+      description: Enterprise admins only. 403 for a member.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, spec]
+              properties:
+                kind: { enum: [connector, model] }
+                spec: { type: string, description: The raw YAML document. }
+      responses:
+        '201': { description: registered }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v0/admin/teams/{id}:
+    post:
+      tags: [admin]
+      summary: Edit a team layer
+      description: |
+        Enterprise admins only. Team layers are set ONLY by admins; members build
+        inside the limits they are given. A change applies on every agent's next
+        run and is not opt-in, so the response lists the agents it affects.
+      parameters: [{ $ref: '#/components/parameters/id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [spec]
+              properties:
+                spec: { type: string }
+                dry_run:
+                  type: boolean
+                  default: false
+                  description: Return the impact list without saving.
+      responses:
+        '200':
+          description: saved, with the agents this affects
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyImpact' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v0/admin/enterprise:
+    post:
+      tags: [admin]
+      summary: Edit the enterprise layer
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [spec]
+              properties:
+                spec: { type: string }
+                dry_run: { type: boolean, default: false }
+      responses:
+        '200':
+          description: saved, with the agents this affects
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyImpact' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v0/admin/calibration:
+    post:
+      tags: [admin]
+      summary: Add human labels and recompute judge agreement
+      description: |
+        Calibration lives only in `calibration_labels`. SPEC.md §7 names a YAML
+        path that the JSON Schema rejects. See FROZEN D19.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [labels]
+              properties:
+                labels:
+                  type: array
+                  items:
+                    type: object
+                    required: [case_name, output_redacted, human_verdict]
+                    properties:
+                      agent_version_id: { type: integer }
+                      case_name: { type: string }
+                      output_redacted: { type: string }
+                      human_verdict: { type: boolean }
+      responses:
+        '200':
+          description: recomputed agreement
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agreement: { type: number }
+                  kappa: { type: number }
+                  n_labels: { type: integer }
+                  calibrated:
+                    type: boolean
+                    description: When false, judge results cannot gate a publish.
+
+  /v0/metrics:
+    get:
+      tags: [runs]
+      summary: Analytics, filtered to what the caller can see
+      parameters:
+        - { name: team, in: query, schema: { type: string } }
+        - { name: agent, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: metrics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Metrics' }
+
+components:
+  securitySchemes:
+    demoUser:
+      type: apiKey
+      in: header
+      name: X-ReAgent-User
+      description: |
+        Log-in-as, for the demo only. Roles are enforced server-side from this;
+        identity is not authenticated. SPEC.md §16 puts SSO out of scope.
+        This header is the ONLY source of the acting principal. See FROZEN D2.
+
+  parameters:
+    name:
+      name: name
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9-]+$' }
+    id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer }
+
+  responses:
+    NotFound:
+      description: not found, or not visible to this caller (deliberately indistinguishable)
+    Forbidden:
+      description: the caller's role does not permit this
+    Unresolvable:
+      description: the agent does not resolve against its layers
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/RejectionList' }
+
+  schemas:
+    Rejection:
+      type: object
+      required: [code, field, blocked_by, message]
+      description: |
+        One refusal. `message` is rendered VERBATIM in the dashboard and the CLI:
+        SPEC.md §1 requires an error naming the field and the blocking layer, and
+        demo step 4 shows exactly this. Codes are in contracts/errors.py.
+      properties:
+        code: { type: string, pattern: '^E_[A-Z_]+$' }
+        field: { type: string }
+        blocked_by: { type: string }
+        attempted: {}
+        allowed: {}
+        message: { type: string }
+
+    RejectionList:
+      type: object
+      required: [rejections]
+      properties:
+        rejections:
+          type: array
+          items: { $ref: '#/components/schemas/Rejection' }
+
+    AgentSummary:
+      type: object
+      required: [name, version, description]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        status: { enum: [draft, published, deprecated] }
+        team: { type: string }
+        description: { type: string }
+        desired_outcome: { type: string }
+        tags: { type: array, items: { type: string } }
+        forked_from: { type: ['string', 'null'] }
+        update_available:
+          type: boolean
+          description: True when the agent this was forked from has published a newer version.
+        pass_rate: { type: ['number', 'null'] }
+        production_success_rate: { type: ['number', 'null'] }
+        avg_cost_usd: { type: ['number', 'null'] }
+        runs_30d: { type: integer }
+
+    AgentDetail:
+      allOf:
+        - $ref: '#/components/schemas/AgentSummary'
+        - type: object
+          properties:
+            spec_yaml: { type: string }
+            level: { enum: [team, enterprise] }
+            versions:
+              type: array
+              items:
+                type: object
+                properties:
+                  version: { type: string }
+                  status: { type: string }
+                  published_at: { type: ['string', 'null'] }
+                  published_by: { type: ['string', 'null'] }
+
+    RunAccepted:
+      type: object
+      required: [run_id, status]
+      properties:
+        run_id: { type: integer }
+        status: { enum: [running, awaiting_approval] }
+
+    RunResult:
+      type: object
+      required: [run_id, status]
+      properties:
+        run_id: { type: integer }
+        parent_run_id: { type: ['integer', 'null'] }
+        status: { enum: [running, succeeded, failed, denied, cancelled, awaiting_approval] }
+        output: { type: ['object', 'null'] }
+        cost_usd: { type: number }
+        input_tokens: { type: integer }
+        output_tokens: { type: integer }
+        steps: { type: integer }
+        latency_ms: { type: ['integer', 'null'] }
+        model: { type: ['string', 'null'] }
+        error: { type: ['string', 'null'] }
+        rejections:
+          type: array
+          items: { $ref: '#/components/schemas/Rejection' }
+        pending_approval_id:
+          type: ['integer', 'null']
+          description: Set when status is awaiting_approval.
+
+    Approval:
+      type: object
+      required: [id, run_id, action, requested_at]
+      properties:
+        id: { type: integer }
+        run_id: { type: integer }
+        agent: { type: string }
+        team: { type: string }
+        action: { type: string }
+        risk: { enum: [read, write, destructive] }
+        args_redacted: { type: ['object', 'null'] }
+        requested_at: { type: string, format: date-time }
+        expires_at: { type: ['string', 'null'], format: date-time }
+        decision:
+          enum: [approved, rejected, expired, null]
+          description: 'An expired approval DENIED the action and failed the run. See FROZEN D16.'
+        approver: { type: ['string', 'null'] }
+        decided_at: { type: ['string', 'null'], format: date-time }
+
+    EvalReport:
+      type: object
+      required: [agent, version, pass_rate, pass_rate_ci_low, pass_rate_ci_high]
+      properties:
+        agent: { type: string }
+        version: { type: string }
+        kind: { enum: [ci, production, mutation] }
+        runs_per_case: { type: integer }
+        pass_rate: { type: number }
+        pass_rate_ci_low:
+          type: number
+          description: Wilson 95% lower bound. A regression is flagged only when two versions' intervals do not overlap.
+        pass_rate_ci_high: { type: number }
+        pass_k:
+          type: number
+          description: Share of cases passing on ALL k runs. Measures consistency rather than luck.
+        recall: { type: ['number', 'null'] }
+        false_alarm_rate: { type: ['number', 'null'] }
+        safety_pass_rate:
+          type: ['number', 'null']
+          description: Must be 1.0 to gate a publish.
+        mutation_score: { type: ['number', 'null'] }
+        tool_call_accuracy: { type: ['number', 'null'] }
+        human_intervention_rate: { type: ['number', 'null'] }
+        avg_cost: { type: number }
+        p95_latency: { type: integer }
+        judge_calibrated:
+          type: boolean
+          description: When false, judge results are marked uncalibrated and cannot gate.
+        gate_blocked: { type: boolean }
+        cases:
+          type: array
+          items:
+            type: object
+            properties:
+              case_id: { type: string, description: 'Scoped identity, e.g. agent/flags-leaked-aws-key.' }
+              kind: { enum: [positive, negative, safety] }
+              passed: { type: boolean }
+              runs: { type: integer }
+              passes: { type: integer }
+              error: { type: ['string', 'null'] }
+              checks: { type: object }
+
+    PublishRun:
+      type: object
+      required: [id, agent, stage, status]
+      properties:
+        id: { type: integer }
+        agent: { type: string }
+        draft_version: { type: string }
+        stage:
+          enum: [validate, security, generate, review, evals, gate, publish]
+          description: The current or failing stage only. Lifecycle is in `status`.
+        status:
+          enum: [running, failed, abandoned, succeeded]
+          description: See FROZEN D17.
+        started_by: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: ['string', 'null'], format: date-time }
+        stage_results: { type: object }
+        cases:
+          type: array
+          description: Generated and inherited cases with their review state.
+          items:
+            type: object
+            properties:
+              case_id: { type: string }
+              origin: { enum: [generated, authored, inherited] }
+              kind: { enum: [positive, negative, safety] }
+              decision: { enum: [approved, edited, rejected, null] }
+              case: { type: ['object', 'null'], description: 'Null for inherited cases: members see only names and results.' }
+              reviewed_by: { type: ['string', 'null'] }
+        report: { $ref: '#/components/schemas/EvalReport' }
+        comparison:
+          type: object
+          description: Diff against the previous published version.
+          properties:
+            previous_version: { type: ['string', 'null'] }
+            pass_rate_delta: { type: ['number', 'null'] }
+            cost_delta: { type: ['number', 'null'] }
+            p95_delta: { type: ['integer', 'null'] }
+            significant:
+              type: boolean
+              description: False when the confidence intervals overlap, so no change is claimed.
+
+    PolicyImpact:
+      type: object
+      description: |
+        Layer changes are not opt-in and apply on every agent's next run, so a
+        change lists what it affects before it is saved.
+      properties:
+        saved: { type: boolean }
+        affected_agents:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              team: { type: string }
+              effect: { enum: [tightened, broken, unaffected] }
+              rejections:
+                type: array
+                items: { $ref: '#/components/schemas/Rejection' }
+
+    Metrics:
+      type: object
+      properties:
+        runs_over_time:
+          type: array
+          items:
+            type: object
+            properties:
+              bucket: { type: string, format: date-time }
+              runs: { type: integer }
+              failures: { type: integer }
+              cost_usd: { type: number }
+        success_rate: { type: number }
+        p50_latency_ms: { type: integer }
+        p95_latency_ms: { type: integer }
+        cost_usd: { type: number }
+        budget_usd: { type: ['number', 'null'] }
+        human_intervention_rate: { type: ['number', 'null'] }
+        top_tools:
+          type: array
+          items:
+            type: object
+            properties:
+              action: { type: string }
+              calls: { type: integer }
+              denials: { type: integer }
+        denials: { type: integer }
+        policy_violations: { type: integer }
+        eval_pass_rate_by_version:
+          type: array
+          items:
+            type: object
+            properties:
+              version: { type: string }
+              pass_rate: { type: number }

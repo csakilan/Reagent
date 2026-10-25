@@ -147,3 +147,65 @@ def test_sub_agent_versions_are_pinned_exactly(root):
     for s in doc["effective"]["sub_agents"]:
         assert re.fullmatch(r"\d+\.\d+\.\d+", s["version"]), \
             f"{s['name']}@{s['version']} is not an exact version"
+
+
+# --- the API contract ------------------------------------------------------
+
+def test_openapi_covers_every_spec_route(root):
+    import yaml
+    d = yaml.safe_load((root / "contracts" / "openapi.yaml").read_text())
+    need = {
+        "/v0/agents", "/v0/agents/{name}", "/v0/agents/{name}/resolved",
+        "/v0/agents/{name}/runs", "/v0/agents/{name}/validate",
+        "/v0/agents/{name}/evals", "/v0/agents/{name}/fork",
+        "/v0/agents/{name}/publish", "/v0/runs/{id}", "/v0/runs/{id}/trace",
+        "/v0/publish-runs/{id}", "/v0/publish-runs/{id}/continue",
+        "/v0/publish-runs/{id}/cases/{case}/review",
+        "/v0/publish-runs/{id}/cases/{case}/dry-run",
+        "/v0/meta-agents", "/v0/meta-agents/{name}/runs",
+        "/v0/approvals", "/v0/approvals/{id}", "/v0/connector-requests",
+        "/v0/admin/registry", "/v0/admin/teams/{id}", "/v0/admin/enterprise",
+        "/v0/admin/calibration", "/v0/metrics",
+    }
+    missing = need - set(d["paths"])
+    assert not missing, f"SPEC.md §14 routes missing from the contract: {sorted(missing)}"
+
+
+def test_run_body_has_no_user_field(root):
+    """FROZEN D2. SPEC.md §14 defines the body as {input, user}, which lets any
+    caller borrow another user's token scope through an on_behalf_of tool."""
+    import yaml
+    d = yaml.safe_load((root / "contracts" / "openapi.yaml").read_text())
+    schema = (d["paths"]["/v0/agents/{name}/runs"]["post"]["requestBody"]
+              ["content"]["application/json"]["schema"])
+    assert "user" not in schema["properties"], \
+        "the acting principal comes from the session, never the request body"
+    assert schema.get("additionalProperties") is False, \
+        "the body must be closed, or `user` creeps back in"
+
+
+def test_approval_decision_cannot_be_set_to_expired_by_a_caller(root):
+    """FROZEN D16: expiry is a platform action that DENIES. A caller forcing
+    `expired` would be laundering a denial into a decision."""
+    import yaml
+    d = yaml.safe_load((root / "contracts" / "openapi.yaml").read_text())
+    schema = (d["paths"]["/v0/approvals/{id}"]["post"]["requestBody"]
+              ["content"]["application/json"]["schema"])
+    assert set(schema["properties"]["decision"]["enum"]) == {"approved", "rejected"}
+
+
+def test_run_events_schema_is_valid(root):
+    import json
+    from jsonschema import Draft202012Validator
+    s = json.loads((root / "contracts" / "run_events.schema.json").read_text())
+    Draft202012Validator.check_schema(s)
+    # Every type the database CHECK constraint allows must be describable here,
+    # or the runtime can write a row the trace viewer cannot render.
+    ddl = (root / "contracts" / "db" / "001_init.sql").read_text()
+    import re
+    m = re.search(r"type\s+text\s+NOT NULL\s*\n\s*CHECK \(type IN \(([^)]+)\)\)", ddl)
+    assert m, "could not find the run_events type CHECK in the DDL"
+    db_types = {x.strip().strip("'") for x in m.group(1).replace("\n", "").split(",")}
+    assert db_types == set(s["properties"]["type"]["enum"]), (
+        f"DDL and schema disagree. only in DDL: {db_types - set(s['properties']['type']['enum'])}; "
+        f"only in schema: {set(s['properties']['type']['enum']) - db_types}")
