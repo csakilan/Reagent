@@ -116,7 +116,9 @@ def get_agent(name: str, x_reagent_user: str | None = Header(default=None)):
                 for v, d in sorted(cat.agent_versions(name).items(), key=lambda kv: semver_key(kv[0]))]
     clean = {k: v for k, v in doc.items() if not k.startswith("_")}
     return {**_summary(doc), "level": doc["metadata"].get("level", "team"),
-            "spec_yaml": yaml.safe_dump(clean, sort_keys=False), "versions": versions}
+            "spec_yaml": yaml.safe_dump(clean, sort_keys=False), "versions": versions,
+            # The run form renders real fields from this, not a raw JSON body.
+            "input_schema": doc.get("spec", {}).get("input")}
 
 
 def _grant_line(name: str, g: dict[str, Any]) -> str:
@@ -933,6 +935,18 @@ def post_build_agent(body: dict[str, Any] = Body(...), x_reagent_user: str | Non
     return {"name": name, "by": by, "source": doc["metadata"].get("forked_from") or f"team:{target}",
             "reason": reason, "candidates": candidates, "team": target,
             "spec_yaml": yaml.safe_dump(doc, sort_keys=False), "rejections": resolved["rejections"]}
+
+
+@router.get("/runs/{run_id}/triage", tags=["runs"])
+async def get_run_triage(run_id: int, x_reagent_user: str | None = Header(default=None)):
+    """failure-triage, triggered by opening a failed or denied run in the trace viewer.
+    Not in contracts/openapi.yaml yet (reported)."""
+    from runtime.api import runs as _runs
+    from runtime.evals.triage import triage
+    _principal(load_catalog(), x_reagent_user)
+    run = await _runs.get_run(run_id)
+    trace = await _runs.get_trace(run_id)
+    return triage(run, trace)
 
 
 def create_app() -> FastAPI:

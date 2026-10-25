@@ -141,3 +141,7 @@ export const runMetaAgent = (name: string, input: Record<string, unknown>) => un
 
 /** agent-builder: draft an agent from a plain-English request (fork the closest, or the base). */
 export const buildAgent = (request: string, team?: string) => untyped("POST", "/v0/agents/build", team ? { request, team } : { request });
+
+/** failure-triage: why a failed or denied run failed, and what to change. */
+export type Triage = { run_id: number; status: string; failed: boolean; code?: string | null; cause?: string; explanation?: string; fix?: string; evidence?: string[] };
+export const runTriage = (id: number) => untyped("GET", `/v0/runs/${id}/triage`);

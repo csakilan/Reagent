@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { call, listAgents, runResult, startRun, traceForRun, type AgentSummary, type Rejection, type RunEvent, type RunResult, type Trace } from "../../lib/api";
+import { agentDetail, call, listAgents, runResult, runTriage, startRun, traceForRun, type Triage, type AgentSummary, type Rejection, type RunEvent, type RunResult, type Trace } from "../../lib/api";
 import { recordedAgents, recordedRun, recordedTrace } from "../../lib/fixtures";
 import { useDemoUser, useLive } from "../../lib/live";
 import { Failure, Icon, KeyValues, PageHead, Payload, Rejections, Skeleton, SourceTag, Verdict, usd } from "../ui";
@@ -13,7 +13,46 @@ type Row = { event: RunEvent; runId: number; depth: number; start: number; durat
 
 const payloadOf = (event: RunEvent) => (event.payload_redacted ?? {}) as Detail;
 const num = (value: unknown) => typeof value === "number" ? value : 0;
-const DEFAULT_INPUT = { "pr-reviewer": { repo: "nmc2/infra", pr_number: 42 } } as Record<string, object>;
+const DEFAULT_INPUT = { "pr-reviewer": { repo: "csakilan/reagent-demo", pr_number: 1 } } as Record<string, Record<string, unknown>>;
+
+/** The agent's declared `input` schema, rendered as real fields (GET /v0/agents/{name}). */
+type Prop = { type?: string; enum?: unknown[]; description?: string };
+type InputSchema = { properties?: Record<string, Prop>; required?: string[] } | null;
+
+function InputFields({ schema, values, onChange }: { schema: InputSchema; values: Record<string, string>; onChange: (key: string, value: string) => void }) {
+  const props = Object.entries(schema?.properties ?? {});
+  if (!props.length) return <p className="muted">This agent declares no input. It runs on its trigger alone.</p>;
+  return <div className="input-fields">{props.map(([key, prop]) => {
+    const required = schema?.required?.includes(key);
+    const label = <span>{key}{required ? " *" : ""}{prop.description ? <small className="muted"> {prop.description}</small> : null}</span>;
+    if (prop.enum) return <label className="field" key={key}>{label}
+      <select className="select" value={values[key] ?? ""} onChange={event => onChange(key, event.target.value)}>
+        <option value="">Choose…</option>{prop.enum.map(v => <option key={String(v)} value={String(v)}>{String(v)}</option>)}</select></label>;
+    if (prop.type === "boolean") return <label className="field-inline" key={key}>
+      <input type="checkbox" checked={values[key] === "true"} onChange={event => onChange(key, event.target.checked ? "true" : "false")} />{label}</label>;
+    const numeric = prop.type === "integer" || prop.type === "number";
+    return <label className="field" key={key}>{label}
+      <input className={numeric ? "input mono" : "input"} inputMode={numeric ? "numeric" : undefined} value={values[key] ?? ""}
+        onChange={event => onChange(key, event.target.value)} required={required} /></label>;
+  })}</div>;
+}
+
+/** Field strings to typed input, by the schema. Empty optional fields are left out. */
+function typed(schema: InputSchema, values: Record<string, string>): { input?: Record<string, unknown>; error?: string } {
+  const out: Record<string, unknown> = {};
+  for (const [key, prop] of Object.entries(schema?.properties ?? {})) {
+    const raw = (values[key] ?? "").trim();
+    if (!raw) { if (schema?.required?.includes(key)) return { error: `${key} is required.` }; continue; }
+    if (prop.type === "integer" || prop.type === "number") {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || (prop.type === "integer" && !Number.isInteger(n))) return { error: `${key} must be ${prop.type === "integer" ? "a whole number" : "a number"}.` };
+      out[key] = n;
+    } else if (prop.type === "boolean") out[key] = raw === "true";
+    else out[key] = raw;
+  }
+  return { input: out };
+}
+
 
 /** Runs do not store their input, so the dashboard keeps what it sent (per tab). */
 const RUN_INPUT_KEY = (id: number) => `reagent-run-input:${id}`;
@@ -38,6 +77,19 @@ function contextOf(trace: Trace, runId: number): RunContext {
     if (out.subject) { if (out.input === undefined) { out.input = args; out.inputFrom = "derived"; } break; }
   }
   return out;
+}
+
+/** failure-triage, triggered by opening a failed or denied run: cause, evidence, fix. */
+function WhyItFailed({ runId, user }: { runId: number; user: string | null }) {
+  const [state] = useLive<Triage>(user ? `triage:${user}:${runId}` : null, () => runTriage(runId));
+  if (state.phase !== "ready" || !state.data.failed) return null;
+  const t = state.data;
+  return <section className="run-why" aria-label="Why this run failed">
+    <h2>Why this run failed <span className="muted">· failure-triage</span></h2>
+    <p><b>{t.cause}</b>{t.code ? <> (<code>{t.code}</code>)</> : null}: {t.explanation}</p>
+    {t.evidence && t.evidence.length > 0 && <ul>{t.evidence.map((e, i) => <li key={i}><code>{e}</code></li>)}</ul>}
+    <p><b>What to change:</b> {t.fix}</p>
+  </section>;
 }
 
 function ContextBar({ context }: { context: RunContext }) {
@@ -104,14 +156,21 @@ function RunForm({ initialAgent }: { initialAgent: string }) {
   const user = useDemoUser();
   const [agents] = useLive<{ agents: AgentSummary[] }>(user && `agents:${user}`, () => listAgents(), { fallback: recordedAgents });
   const [agent, setAgent] = useState(initialAgent);
-  const [input, setInput] = useState(JSON.stringify(DEFAULT_INPUT[initialAgent] ?? {}, null, 2));
+  const [detail] = useLive<{ input_schema?: InputSchema }>(user && agent ? `detail:${user}:${agent}` : null, () => agentDetail(agent));
+  const schema = detail.phase === "ready" ? detail.data.input_schema ?? null : null;
+  const [values, setValues] = useState<Record<string, string>>({});
+  // Prefill from the demo defaults when the agent changes.
+  useEffect(() => {
+    const d = DEFAULT_INPUT[agent] ?? {};
+    setValues(Object.fromEntries(Object.entries(d).map(([k, v]) => [k, String(v)])));
+  }, [agent]);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<{ detail: string; rejections: Rejection[] } | null>(null);
   const [runId, setRunId] = useState("");
 
   async function submit() {
-    let parsed: Record<string, unknown>;
-    try { parsed = JSON.parse(input); } catch { setProblem({ detail: "Input is not valid JSON.", rejections: [] }); return; }
+    const { input: parsed, error } = typed(schema, values);
+    if (!parsed) { setProblem({ detail: error ?? "Check the input.", rejections: [] }); return; }
     setBusy(true); setProblem(null);
     const outcome = await call<RunResult>(startRun(agent, parsed));
     setBusy(false);
@@ -127,11 +186,12 @@ function RunForm({ initialAgent }: { initialAgent: string }) {
       <h2>Start a run</h2>
       <p className="panel-note">Runs as <b>{user ?? "…"}</b>. The acting principal comes from the session, never from the body.</p>
       <label className="field"><span>Agent</span>
-        <select className="select" value={agent} onChange={event => { setAgent(event.target.value); setInput(JSON.stringify(DEFAULT_INPUT[event.target.value] ?? {}, null, 2)); }}>
+        <select className="select" value={agent} onChange={event => setAgent(event.target.value)}>
           {[...new Set([agent, ...names])].map(name => <option key={name}>{name}</option>)}
         </select>
       </label>
-      <label className="field"><span>Input</span><textarea className="code-input" rows={5} value={input} onChange={event => setInput(event.target.value)} spellCheck={false} /></label>
+      {detail.phase === "loading" ? <Skeleton rows={2} columns={1} label="Loading this agent's input" />
+        : <InputFields schema={schema} values={values} onChange={(key, value) => setValues(current => ({ ...current, [key]: value }))} />}
       <button className="button primary" type="button" disabled={busy} onClick={submit}>{busy ? "Running…" : "Run and open trace"}</button>
       {problem && (problem.rejections.length ? <Rejections items={problem.rejections} title="Run refused" /> : <div className="notice notice-denied">{problem.detail}</div>)}
     </section>
@@ -190,6 +250,7 @@ function RunTrace({ runId }: { runId: number }) {
       <Link className="button" href="/traces">New run</Link>
     </PageHead>
     <ContextBar context={context} />
+    {result && ["failed", "denied"].includes(result.status) && <WhyItFailed runId={runId} user={user} />}
 
     {run.phase === "loading" ? <Skeleton rows={1} columns={6} label="Loading run" /> : result && <div className="stat-row">
       <div><span>Status</span><Verdict kind={statusKind}>{result.status.replace("_", " ")}</Verdict></div>

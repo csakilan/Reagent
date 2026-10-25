@@ -194,3 +194,15 @@ def test_failed_cases_say_why_in_plain_words():
     c = r["cases"][0]
     assert c["input"] == {"repo": "nmc2/infra", "pr_number": 43} and isinstance(c["output"], str)
     assert c["passed"] or c["reasons"]
+
+
+def test_failure_triage_names_the_cause_and_the_fix():
+    """failure-triage, triggered by opening a failed or denied run."""
+    from runtime.evals.triage import triage
+    denied = triage({"run_id": 7, "status": "failed", "error": "E_STEP_LIMIT_EXCEEDED: Model call limits exceeded"},
+                    {"events": [{"type": "tool_call", "action": "github:pulls.merge", "allowed": False}]})
+    assert denied["failed"] and denied["code"] == "E_STEP_LIMIT_EXCEEDED" and "max_steps" in denied["fix"]
+    assert "blocked github:pulls.merge" in denied["evidence"]
+    budget = triage({"run_id": 8, "status": "failed", "error": "E_BUDGET_EXCEEDED: Run halted: spend reached $0.3"}, {"events": []})
+    assert budget["cause"] == "budget cutoff"
+    assert triage({"run_id": 9, "status": "succeeded"}, {"events": []})["failed"] is False

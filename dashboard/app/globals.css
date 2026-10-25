@@ -535,3 +535,12 @@ mark.redacted { padding: 0 4px; border-radius: 2px; background: var(--ink); colo
 .drawer-manual { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
 .drawer-manual > summary { cursor: pointer; font-size: 13px; font-weight: 500; }
 .fork-search { display: grid; gap: 8px; margin: 4px 0 10px; }
+
+.input-fields { display: grid; gap: 0; }
+.input-fields .field small { font-weight: 400; }
+
+/* failure-triage on a failed run: bordered in the verdict colour, no stripe. */
+.run-why { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--denied); border-radius: var(--radius); background: var(--denied-wash); font-size: 13.5px; }
+.run-why h2 { margin: 0 0 6px; font-size: 14px; }
+.run-why p { margin: 4px 0; }
+.run-why ul { margin: 4px 0; padding-left: 18px; }
