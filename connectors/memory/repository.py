@@ -49,8 +49,16 @@ class Memory:
             'FROM teams t CROSS JOIN users u WHERE t.id=%s AND u.id=%s', (team_id, user_id)).fetchone()
         if not principal or not (principal[1] or principal[2]):
             raise ValueError('E_MEMORY_ACCESS_DENIED')
-        row = conn.execute('SELECT id,type,"read","write" FROM memory_buckets WHERE name=%s FOR SHARE', (name,)).fetchone()
-        if not row or not permitted(row[2 if mode == 'read' else 3], principal[0], principal[1]):
+        row = conn.execute('SELECT id,type,"read","write",owner_team_id FROM memory_buckets WHERE name=%s FOR SHARE', (name,)).fetchone()
+        if not row:
+            raise ValueError('E_MEMORY_ACCESS_DENIED')
+        if mode == 'write' and row[1] == 'episodic' and headers.get('x-reagent-invocation') == 'system':
+            # Episodic buckets have write: [] because only the runtime writes
+            # them; its episode for a run goes to that run's own team's bucket.
+            if not principal[2] or str(row[4]) != str(team_id):
+                raise ValueError('E_MEMORY_ACCESS_DENIED')
+            return row
+        if not permitted(row[2 if mode == 'read' else 3], principal[0], principal[1]):
             raise ValueError('E_MEMORY_ACCESS_DENIED')
         return row
 

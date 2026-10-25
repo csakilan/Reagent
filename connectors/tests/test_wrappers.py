@@ -176,6 +176,52 @@ def test_memory_acl_and_type_policy():
     assert m.write_status('procedural', runtime=False) == 'pending'
 
 
+class _Rows:
+    def __init__(self, row):
+        self.row = row
+
+    def fetchone(self):
+        return self.row
+
+
+class _BucketConn:
+    """Principal: team 1 (platform-eng), user 1, a member unless member=False."""
+    def __init__(self, bucket_row, member=True):
+        self.bucket_row, self.member = bucket_row, member
+
+    def execute(self, sql, params):
+        if 'FROM teams' in sql:
+            return _Rows(('platform-eng', False, self.member))
+        return _Rows(self.bucket_row)
+
+
+@pytest.mark.parametrize('headers,bucket,member,ok', [
+    # the runtime's own episode write into its team's episodic bucket
+    ({'x-reagent-invocation': 'system'}, (3, 'episodic', ['platform-eng'], [], 1), True, True),
+    # an agent (no system invocation) is still refused by the empty write list
+    ({}, (3, 'episodic', ['platform-eng'], [], 1), True, False),
+    # system, but another team's episodic bucket
+    ({'x-reagent-invocation': 'system'}, (9, 'episodic', ['people-ops'], [], 2), True, False),
+    # system, but the user is not a member of the team
+    ({'x-reagent-invocation': 'system'}, (3, 'episodic', ['platform-eng'], [], 1), False, False),
+    # system does not widen a semantic bucket's write list
+    ({'x-reagent-invocation': 'system'}, (5, 'semantic', ['*'], ['people-ops'], 1), True, False),
+])
+def test_memory_episodic_write_is_runtime_only_and_own_team(headers, bucket, member, ok):
+    m = module('connectors.memory.repository')
+    c = module('connectors.common')
+    token = c.TRUSTED_HEADERS.set({'x-reagent-team-id': '1', 'x-reagent-user-id': '1', **headers})
+    try:
+        conn = _BucketConn(bucket, member)
+        if ok:
+            assert m.Memory().bucket(conn, 'platform-eng-history', 'write')[0] == bucket[0]
+        else:
+            with pytest.raises(ValueError, match='E_MEMORY_ACCESS_DENIED'):
+                m.Memory().bucket(conn, 'b', 'write')
+    finally:
+        c.TRUSTED_HEADERS.reset(token)
+
+
 def test_all_handlers_match_contract():
     for name in ['github', 'slack', 'memory']:
         server = module(f'connectors.{name}.server')
