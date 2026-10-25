@@ -115,6 +115,37 @@ def iter_documents(root: pathlib.Path):
 
 
 def load_catalog(root: str | os.PathLike | None = None) -> Catalog:
+    """The layers, re-read on every call. REAGENT_LAYERS=db reads the database
+    (SPEC.md §1); anything else, or an explicit `root`, reads a spec directory."""
+    if root is None and os.environ.get("REAGENT_LAYERS", "files").lower() == "db":
+        return load_catalog_db()
+    return load_catalog_files(root)
+
+
+def load_catalog_db(url: str | None = None) -> Catalog:
+    """Every layer from the tables in contracts/db/001_init.sql. Each row's `spec`
+    column holds the whole document, exactly as the files do."""
+    import psycopg
+
+    with psycopg.connect(url or os.environ.get("DATABASE_URL") or "", connect_timeout=15) as c:
+        ent = c.execute("SELECT spec FROM enterprise ORDER BY id LIMIT 1").fetchone()
+        if ent is None:
+            raise LookupError("no enterprise layer in the database")
+        teams = {n: s for n, s in c.execute("SELECT name, spec FROM teams")}
+        reg = c.execute("SELECT kind, name, spec FROM registry_items "
+                        "WHERE status IS DISTINCT FROM 'deprecated'").fetchall()
+        agents = [s for (s,) in c.execute(
+            "SELECT v.spec FROM agent_versions v JOIN agents a ON a.id = v.agent_id "
+            "WHERE v.status IN ('published', 'draft')")]
+    cat = Catalog(ent[0], teams,
+                  {n: s for k, n, s in reg if k == "connector"},
+                  {n: s for k, n, s in reg if k == "model"}, wire=load_wire())
+    for a in agents:
+        cat.add_agent(a)
+    return cat
+
+
+def load_catalog_files(root: str | os.PathLike | None = None) -> Catalog:
     root = pathlib.Path(root or os.environ.get("REAGENT_SPEC_ROOT") or DEFAULT_SPEC_ROOT)
     enterprise = None
     teams: dict[str, Any] = {}

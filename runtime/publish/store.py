@@ -55,6 +55,9 @@ class MemoryStore:
             raise KeyError(run_id)
         return self.runs[run_id]
 
+    def save(self, run: dict[str, Any]) -> None:
+        """Runs are held by reference; nothing to write."""
+
     def finish(self, run: dict[str, Any], status: str) -> None:
         run["status"] = status
         run["finished_at"] = now()

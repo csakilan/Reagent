@@ -14,8 +14,10 @@ Meta-agents and secret-scanner are seeded published (D8) and never enter here.
 from __future__ import annotations
 
 import copy
+import functools
 import hashlib
 import json
+import os
 from typing import Any
 
 from contracts.errors import Code, ReAgentError, Rejection
@@ -27,7 +29,27 @@ from runtime.resolver.validate import PLATFORM_SEEDED, case_issues, coverage_iss
 from .review import generate_cases, security_review
 from .store import MemoryStore, now
 
-STORE = MemoryStore()
+
+
+def _default_store():
+    """REAGENT_PUBLISH_STORE=db persists to Postgres; otherwise in memory."""
+    if os.environ.get("REAGENT_PUBLISH_STORE", "memory").lower() == "db":
+        from .pgstore import PgStore
+        return PgStore()
+    return MemoryStore()
+
+
+STORE = _default_store()
+
+
+def _persist(fn):
+    """Save the run after every transition, whichever store holds it."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kw):
+        run = fn(*args, **kw)
+        kw.get("store", STORE).save(run)
+        return run
+    return wrapper
 
 
 def _layers_hash(cat: Any, doc: dict[str, Any]) -> str:
@@ -58,6 +80,7 @@ def _rej(code: Code, field: str, attempted: Any = None, layer: str = "default",
     return d
 
 
+@_persist
 def start(agent: str, started_by: str, draft: dict[str, Any] | None = None, *,
           store: MemoryStore = STORE, catalog: Any = None) -> dict[str, Any]:
     cat = catalog or load_catalog()
@@ -109,6 +132,7 @@ def start(agent: str, started_by: str, draft: dict[str, Any] | None = None, *,
     return run
 
 
+@_persist
 def acknowledge(run_id: int, user: str, *, store: MemoryStore = STORE) -> dict[str, Any]:
     """The author acknowledges stage 2's advisory findings."""
     run = store.get(run_id)
@@ -117,6 +141,7 @@ def acknowledge(run_id: int, user: str, *, store: MemoryStore = STORE) -> dict[s
     return run
 
 
+@_persist
 def review(run_id: int, case_id: str, decision: str, user: str, *, edited_case: dict | None = None,
            reason: str | None = None, store: MemoryStore = STORE) -> dict[str, Any]:
     run = store.get(run_id)
@@ -149,6 +174,7 @@ def review(run_id: int, case_id: str, decision: str, user: str, *, edited_case: 
     return run
 
 
+@_persist
 def proceed(run_id: int, *, store: MemoryStore = STORE, catalog: Any = None,
             fake_model: bool | None = None, runs_per_case: int | None = None) -> dict[str, Any]:
     run = store.get(run_id)
@@ -202,6 +228,11 @@ def proceed(run_id: int, *, store: MemoryStore = STORE, catalog: Any = None,
         moved = _layers_hash(cat_now, draft) != run["layers_hash"]
         code = Code.LAYERS_CHANGED_MID_PIPELINE if moved else Code.SCHEMA_INVALID
         return _fail(run, "publish", [_rej(code, "layers")] + again["rejections"], store)
+    pinned = {s["name"]: s["version"] for s in again["effective"]["sub_agents"]}
+    for sa in draft["spec"].get("sub_agents") or []:          # D24: store exact name@x.y.z
+        name = sa["ref"].partition("@")[0]
+        if name in pinned:
+            sa["ref"] = f"{name}@{pinned[name]}"
     version = {"agent": run["agent"], "version": run["draft_version"], "status": "published",
                "spec": draft, "sub_agents": again["effective"]["sub_agents"],   # D24: pinned exact
                "report": report, "published_at": now(), "publish_run_id": run["id"]}
@@ -211,6 +242,7 @@ def proceed(run_id: int, *, store: MemoryStore = STORE, catalog: Any = None,
     return run
 
 
+@_persist
 def abandon(run_id: int, *, store: MemoryStore = STORE) -> dict[str, Any]:
     run = store.get(run_id)
     if run["status"] == "running":
