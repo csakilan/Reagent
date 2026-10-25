@@ -1,0 +1,5 @@
+import Link from "next/link";
+
+export default function PrivacyPage() {
+  return <main className="privacy-page"><div className="eyebrow">ReAgent / Governance</div><h1>Privacy and trace retention</h1><p>ReAgent is self-hosted. The organization operating this instance controls its database, model endpoint and retention settings.</p><h2>What the platform logs</h2><p>For each run, ReAgent records run and parent IDs, agent version, team, trigger, acting user, model, token counts, cost, latency, step count, tool actions and resources, allow or deny outcomes, approvals, retries, errors, redaction hits and policy violations.</p><h2>Redaction</h2><p>Model output, tool results, traces and logs pass through redaction before storage. Trace payloads contain redacted details; matched secret or personal values are stripped and are not stored in the trace event.</p><h2>Retention</h2><p>Run traces are retained for 30 days. The self-hosted operator controls the database and is responsible for its backups and retention configuration.</p><p><Link href="/">Return to policy resolution</Link></p></main>;
+}
