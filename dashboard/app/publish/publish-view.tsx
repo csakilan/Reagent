@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { abandonPublish, call, continuePublish, costCheck, type CostCheck, dryRunCase, listAgents, publishRun, reviewCase, startPublish, type AgentSummary, type EvalReport, type PublishRun, type Rejection } from "../../lib/api";
 import { recordedAgents, recordedPublishRun } from "../../lib/fixtures";
@@ -22,7 +22,10 @@ type Results = Record<string, { passed?: boolean; at?: string; rejections?: Reje
 type ReportCase = NonNullable<EvalReport["cases"]>[number] & {
   origin?: string; gating?: boolean; input?: unknown; output?: string; reasons?: string[];
   tool_calls?: string[]; blocked_calls?: string[]; inert_mocks?: string[] };
-type Run = PublishRun & { steps?: Step[]; report?: EvalReport & { runs_per_case?: number; gate_reasons?: string[] } };
+/** Background work on the server (runtime/publish/live.py): pre-runs during review, and live eval progress. */
+type PreRun = { status: "queued" | "running" | "passed" | "failed" | "error"; case_hash?: string; result?: ReportCase | null; error?: string | null };
+type LiveState = { prerun: Record<string, PreRun>; evals: { status: "running" | "done"; cases: ReportCase[]; done: number; total: number | null; error: string | null } | null };
+type Run = PublishRun & { steps?: Step[]; live?: LiveState | null; report?: EvalReport & { runs_per_case?: number; gate_reasons?: string[] } };
 
 const FALLBACK_STEPS: Step[] = [
   ["validate", "Validate"], ["security", "Security review"], ["generate", "Generate tests"], ["review", "Human review"],
@@ -46,7 +49,7 @@ function checksOf(body: CaseBody | null) {
 }
 
 /** One case awaiting review: a single line, expanding to everything a reviewer needs. */
-function ReviewCase({ runId, item, onChange }: { runId: number; item: Case; onChange: () => void }) {
+function ReviewCase({ runId, item, pre, onChange }: { runId: number; item: Case; pre?: PreRun; onChange: () => void }) {
   const body = item.case as CaseBody | null;
   const [mode, setMode] = useState<"view" | "edit" | "reject">("view");
   const [draft, setDraft] = useState(() => JSON.stringify(body ?? {}, null, 2));
@@ -76,6 +79,7 @@ function ReviewCase({ runId, item, onChange }: { runId: number; item: Case; onCh
         : decision === "rejected" ? <Verdict kind="fail">rejected</Verdict> : <Verdict kind="pending">needs review</Verdict>}
       <code>{caseId}</code><span className="tag">{item.kind}</span><span className="tag">{item.origin}</span>
       {item.reviewed_by && <span className="muted">by {item.reviewed_by}</span>}
+      {pre && decision !== "rejected" && <PreRunTag pre={pre} />}
     </summary>
     <div className="ci-detail">
       {body ? <div className="ci-grid">
@@ -107,6 +111,15 @@ function ReviewCase({ runId, item, onChange }: { runId: number; item: Case; onCh
       {problem && (problem.rejections.length ? <Rejections items={problem.rejections} /> : <div className="notice notice-denied">{problem.detail}</div>)}
     </div>
   </details>;
+}
+
+/** The background eval a case got as soon as it was approved, so Continue has less to do. */
+function PreRunTag({ pre }: { pre: PreRun }) {
+  if (pre.status === "queued") return <span className="muted">eval queued</span>;
+  if (pre.status === "running") return <Verdict kind="pending">eval running</Verdict>;
+  if (pre.status === "passed") return <Verdict kind="pass">eval passed</Verdict>;
+  if (pre.status === "failed") return <Verdict kind="fail">eval failed</Verdict>;
+  return <span className="muted" title={pre.error ?? undefined}>eval will run on continue</span>;
 }
 
 /** One eval case result. Failures open by default and say why first. */
@@ -190,7 +203,17 @@ function RunReview({ runId }: { runId: number }) {
   const authoredPending = cases.filter(item => item.origin === "authored" && !item.decision && item.case);
   const steps = run?.steps ?? FALLBACK_STEPS;
   const results = (run?.stage_results ?? {}) as Results;
-  const waiting = run?.status === "running" && run.stage === "review";
+  const live = run?.live ?? null;
+  // "done" in memory before the finished run is saved still counts as running for one more poll.
+  const evalsRunning = run?.status === "running" && !!live?.evals && (live.evals.status === "running" || (!run.report && !live.evals.error));
+  const prerunning = run?.status === "running" && Object.values(live?.prerun ?? {}).some(p => p.status === "queued" || p.status === "running");
+  const waiting = run?.status === "running" && run.stage === "review" && !evalsRunning;
+  // Poll while the server works in the background; reload keeps the page on screen.
+  useEffect(() => {
+    if (!evalsRunning && !prerunning) return;
+    const timer = setInterval(reload, 1500);
+    return () => clearInterval(timer);
+  }, [evalsRunning, prerunning, reload]);
 
   async function run_(promise: Promise<{ data?: unknown; error?: unknown; response: Response }>) {
     setBusy(true); setProblem(null);
@@ -222,8 +245,11 @@ function RunReview({ runId }: { runId: number }) {
     <Failure state={state} notFound={<>Pipeline {runId} does not exist or is not visible to this identity.</>} />
     {problem && (problem.rejections.length ? <Rejections items={problem.rejections} title="Pipeline refused" /> : <div className="notice notice-denied">{problem.detail}</div>)}
     {run && <ol className="ci-steps" aria-label="Publish pipeline steps">
-      {steps.map((step, index) => <li key={step.stage} className={`ci-step ci-step-${step.status}`}>
-        <details open={step.status === "waiting" || step.status === "failed" || (step.stage === "evals" && !!run.report)}>
+      {steps.map(given => evalsRunning && (given.stage === "evals" || given.stage === "review")
+          ? { ...given, status: given.stage === "evals" ? "running" as Step["status"] : "passed" as Step["status"],
+              summary: given.stage === "evals" ? `${live?.evals?.done ?? 0} of ${live?.evals?.total ?? "?"} cases finished` : given.summary }
+          : given).map((step, index) => <li key={step.stage} className={`ci-step ci-step-${step.status}`}>
+        <details open={step.status === "waiting" || step.status === "failed" || (step.stage === "evals" && (!!run.report || evalsRunning))}>
           <summary>
             <span className="ci-index">{index + 1}</span><StepStatus status={step.status} /><b>{step.title}</b>
             <span className="ci-summary">{step.summary}</span>
@@ -238,8 +264,13 @@ function RunReview({ runId }: { runId: number }) {
                   <button className="button primary" type="button" disabled={busy || open.length > 0} onClick={() => run_(continuePublish(runId))}>{busy ? "Running evals…" : "Continue to evals"}</button>
                 </div>
               </div>}
-              <div className="ci-items">{cases.map(item => <ReviewCase key={`${item.case_id}-${item.case_hash ?? ""}-${item.decision ?? ""}`} runId={runId} item={item} onChange={reload} />)}</div>
+              <div className="ci-items">{cases.map(item => <ReviewCase key={`${item.case_id}-${item.case_hash ?? ""}-${item.decision ?? ""}`} runId={runId} item={item} pre={live?.prerun?.[item.case_id ?? ""]} onChange={reload} />)}</div>
             </>}
+            {step.stage === "evals" && evalsRunning && !run.report && <>
+              <p className="ci-metrics">Running evals: <b>{live?.evals?.done ?? 0} of {live?.evals?.total ?? "?"}</b> cases finished. Cases that ran during review are reused, so they appear straight away.</p>
+              <div className="ci-items">{(live?.evals?.cases ?? []).map(item => <ResultCase key={item.case_id} item={item} />)}</div>
+            </>}
+            {step.stage === "evals" && live?.evals?.error && <div className="notice notice-denied">{live.evals.error}</div>}
             {step.stage === "evals" && run.report && <>
               <p className="ci-metrics">Pass rate <b>{pct(run.report.pass_rate)}</b> (95% interval {pct(run.report.pass_rate_ci_low)} to {pct(run.report.pass_rate_ci_high)}) · safety <b>{pct(run.report.safety_pass_rate)}</b> · {usd(run.report.avg_cost)} per run · {run.report.runs_per_case ?? "?"} run{run.report.runs_per_case === 1 ? "" : "s"} per case · judge {run.report.judge_calibrated ? "calibrated" : "uncalibrated, not gating"}</p>
               <div className="ci-items">{((run.report.cases ?? []) as ReportCase[]).map(item => <ResultCase key={item.case_id} item={item} />)}</div>

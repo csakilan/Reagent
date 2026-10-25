@@ -351,6 +351,9 @@ def post_publish(name: str, body: dict[str, Any] | None = Body(default=None),
     except ReAgentError as e:
         code = e.rejections[0].code
         return _refusal(e, 409 if code is Code.PIPELINE_ALREADY_RUNNING else 422)
+    if run["status"] == "running" and run["stage"] == "review":
+        from runtime.publish.live import prerun  # inherited cases need no review: run them now
+        prerun(run)
     return {"publish_run_id": run["id"], "review_url": f"{DASHBOARD_URL}/publish?run={run['id']}",
             "run": view(run)}
 
@@ -378,6 +381,8 @@ def post_review(run_id: int, case_id: str, body: dict[str, Any] = Body(...),
         raise HTTPException(422, str(e))
     except ReAgentError as e:
         return _refusal(e, 409)
+    from runtime.publish.live import prerun      # start this case's eval while review goes on
+    prerun(run, [case_id])
     return view(run)
 
 
@@ -404,14 +409,24 @@ def post_dry_run(run_id: int, case_id: str, x_reagent_user: str | None = Header(
 def post_continue(run_id: int, x_reagent_user: str | None = Header(default=None)):
     """Continues to evals once every case is reviewed. Continuing is the author's
     acknowledgement of stage 2's advisory findings."""
-    from runtime.publish import acknowledge, proceed, view
+    from runtime.publish import acknowledge, view
     run = _run_for(run_id, load_catalog(), x_reagent_user)
     if x_reagent_user == run["started_by"]:
         acknowledge(run["id"], x_reagent_user)
+    # Stages 5-7 run in the background (runtime/publish/live.py); the dashboard polls
+    # this run and shows each case as it finishes. Refusals still come back here.
+    from runtime.publish import STORE
+    from runtime.publish.live import continue_in_background
+    from runtime.publish.pipeline import check_ready
+    run = STORE.get(run["id"])
+    if run["status"] != "running":
+        return view(run)
     try:
-        return view(proceed(run["id"]))
+        check_ready(run)
     except ReAgentError as e:
         return _refusal(e, 409)
+    continue_in_background(run["id"])
+    return view(run)
 
 
 @router.post("/admin/calibration", tags=["admin"])

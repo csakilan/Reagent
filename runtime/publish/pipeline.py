@@ -184,18 +184,24 @@ def review(run_id: int, case_id: str, decision: str, user: str, *, edited_case: 
     return run
 
 
-@_persist
-def proceed(run_id: int, *, store: MemoryStore = STORE, catalog: Any = None,
-            fake_model: bool | None = None, runs_per_case: int | None = None) -> dict[str, Any]:
-    run = store.get(run_id)
-    if run["status"] != "running":
-        return run
+def check_ready(run: dict[str, Any]) -> None:
+    """Refuse to leave review while a case is undecided or stage 2 is unacknowledged."""
     open_ = [c["case_id"] for c in run["cases"] if c["decision"] is None]
     if open_:
         raise ReAgentError(Rejection(Code.UNREVIEWED_CASES, "cases", "default", attempted=len(open_)))
     if not run["stage_results"]["security"].get("acknowledged"):
         raise ReAgentError(Rejection(Code.UNREVIEWED_CASES, "security", "default", attempted=0, extra={
             "message": "Stage 2 advisory findings must be acknowledged by the author first."}))
+
+
+@_persist
+def proceed(run_id: int, *, store: MemoryStore = STORE, catalog: Any = None,
+            fake_model: bool | None = None, runs_per_case: int | None = None,
+            on_case: Any = None) -> dict[str, Any]:
+    run = store.get(run_id)
+    if run["status"] != "running":
+        return run
+    check_ready(run)
     cat = catalog or load_catalog()
     kept = [c for c in run["cases"] if c["decision"] in ("approved", "edited")]
     for c in kept:                              # an edit after approval voids it (D15)
@@ -217,7 +223,8 @@ def proceed(run_id: int, *, store: MemoryStore = STORE, catalog: Any = None,
     # REAGENT_PIPELINE_RUNS_PER_CASE overrides the agent's runs_per_case for the
     # pipeline only (a short live demo). The report records the number used.
     runs_per_case = runs_per_case or _env_runs()
-    report = run_evals(run["agent"], runs_per_case, draft=draft, catalog=cat, fake_model=fake_model)
+    report = run_evals(run["agent"], runs_per_case, draft=draft, catalog=cat, fake_model=fake_model,
+                       on_case=on_case, cache=True)
     run["report"] = report
     _pass(run, "evals", pass_rate=report["pass_rate"])
 
@@ -336,4 +343,6 @@ def view(run: dict[str, Any]) -> dict[str, Any]:
     out = {k: v for k, v in run.items() if k not in ("draft", "cases")}
     out["cases"] = [{k: v for k, v in c.items() if not k.startswith("_")} for c in run["cases"]]
     out["steps"] = steps(run)
+    from .live import snapshot                   # background pre-runs and eval progress
+    out["live"] = snapshot(run["id"])
     return out
