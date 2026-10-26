@@ -18,19 +18,18 @@ flags bugs, Terraform mistakes and leaked credentials, a bot that answers HR
 and handbook questions in a Slack channel, and a scanner that other agents call
 to check a diff for secrets.
 
-What makes it a platform rather than a folder of scripts is that the rules an
-agent runs under do not live in the agent. They live in two layers above it,
-owned by whoever is accountable for them, and the runtime applies them to every
-run. An agent cannot grant itself a tool, raise its own spending cap, turn off
-secret redaction or skip a human approval, because none of those are its
-decision to make.
+## The problem it solves
 
-## What it is for
+Building one AI agent means configuring a model, connecting tools, writing a
+prompt, defining guardrails, and setting up evaluation and monitoring. Building
+the tenth means doing all of that again. The work is redundant, it drifts out
+of consistency between teams, and once it exists in ten slightly different
+copies it is difficult to maintain.
 
-The brief came out of the NMC2 workshop, and it set three constraints at once:
-every team was building its agents from scratch, anyone who needed a new tool
-connector had to wait on the central AI team, and software as a service was
-ruled out because the data could not leave their own infrastructure.
+The brief came out of the NMC2 workshop, which added two constraints on top of
+that. Anyone who needed a new tool connector had to wait on the central AI
+team, and software as a service was ruled out because the data could not leave
+their own infrastructure.
 
 Those pull against each other. Let teams move on their own and you lose central
 control of what agents may touch. Keep control central and you become the
@@ -38,9 +37,29 @@ bottleneck everyone waits on. ReAgent separates the two concerns instead of
 trading one off against the other: the central AI team owns the policy layers
 and the connector registry, and teams build whatever they like inside whatever
 those layers leave them. Nobody files a ticket to write an agent, and nobody
-can give themselves a permission their team was never granted. The third
+can give themselves a permission their team was never granted. The last
 constraint is why all of it is self-hosted, on any Postgres and any model
 provider.
+
+## What you inherit
+
+The answer to repeated setup is that a developer writing an agent should only
+have to write the part that is actually theirs. Four things arrive already
+true:
+
+| You inherit | Which means |
+|---|---|
+| **Configuration** | The enterprise and team layers hand an agent its connectors, models, approval rules, budgets and house style before anyone writes a line of it |
+| **Knowledge** | Every run writes back into its team's memory, so a later agent starts knowing what earlier runs established |
+| **Working agents** | A new agent forks whichever team agent has the closest recorded outcome, rather than starting from a blank file |
+| **The platform's own agents** | Meta-agents draft, evaluate, cost-optimise, security-review, triage and curate on your behalf |
+
+The rules an agent runs under are inherited in the same way, and that is what
+makes them enforceable rather than advisory. They live in the layers above the
+agent, owned by whoever is accountable for them, and the runtime applies them
+to every run. An agent cannot grant itself a tool, raise its own spending cap,
+turn off secret redaction or skip a human approval, because none of those are
+its decision to make.
 
 ## Who uses it
 
@@ -56,7 +75,16 @@ approve the actions their team's agents pause on.
 
 Members never see the enterprise layer, enterprise-level agents, or the teams
 they are not in. The API filters every query by the caller, so another team's
-configuration is not merely hidden in the browser, it is never sent.
+configuration is not merely hidden in the browser, it is never sent. Where a
+member inherits a rule they are not allowed to read, the dashboard says so
+plainly and shows the effect without the internals.
+
+The repository ships a mock organisation of three teams, taken from the NMC2
+job descriptions themselves: platform engineering, people ops and customer
+support. Customer support is deliberately the narrowest, and it is the clearest
+illustration of the model working. It is allowed only the two cheapest models,
+it can read and search memory but never write to it, and it is capped at $25 a
+month and three concurrent runs. No agent inside it can widen any of that.
 
 ## What you do with it
 
@@ -64,26 +92,67 @@ configuration is not merely hidden in the browser, it is never sent.
    layer and one layer per team. A connector is a thin MCP wrapper around an
    internal tool that exposes exactly the actions the registry declares, which
    is how credentials stay in the wrapper process and never reach a model.
-2. A team member describes the agent they want in plain English. The
-   `agent-builder` meta-agent drafts a valid `.agent` file and its test cases
-   using only what that team is allowed, and prefers forking an existing team
-   agent over starting from a blank file.
-3. They edit the draft. Asking for a tool, a model, a budget or a trigger the
+2. A team member opens **New agent**. There are three ways in and none of them
+   is a blank file: describe what you want in plain English, search the team's
+   agents by what they achieve and fork the closest, or start from the team's
+   own base configuration. Before anything is written, **What this agent starts
+   with** lists the prompt, model, tools, per-run limits and guardrails being
+   inherited, each tagged with the layer it came from.
+3. Describing it in English runs the outcome search across that team's agents
+   and forks the best match when one scores highly enough, adapting its prompt
+   to the new request and recording what it was forked from. When nothing is
+   close enough it starts from the team's base configuration and says why. With
+   a live model the `agent-builder` meta-agent does this through the platform
+   connector; otherwise the same decision is made directly. Either way the
+   result is a draft, never a published agent.
+4. They edit the draft. Asking for a tool, a model, a budget or a trigger the
    team was never given is refused as they work, naming the field and the layer
    that blocked it.
-4. Publishing starts a seven-stage pipeline. It validates the draft, reviews it
-   for least privilege, generates whatever test cases the suite is missing, and
-   then stops and waits for a person to approve, edit or reject every new or
-   changed test. Only after that does it run the evaluations, check them against
-   the thresholds and the previous version, and create an immutable version.
-5. The published agent runs from HTTP, MCP, a schedule, a GitHub or Slack
+5. Publishing starts a seven-stage pipeline. Publishing is not a save. The
+   platform validates the draft, reviews it for least privilege, generates
+   whatever test cases the suite is missing, and then stops and waits for a
+   person to approve, edit or reject every new or changed test. Only after that
+   does it run the evaluations, compare them against the thresholds and the
+   previous version, and create an immutable version.
+6. The published agent runs from HTTP, MCP, a schedule, a GitHub or Slack
    event, or a call from another agent. Every run re-resolves all three layers,
    checks each tool call against the result, redacts secrets in both directions,
    caps cost, steps and wall-clock time, and pauses for a human before a write
    or destructive action.
-6. All of it is recorded. Nested traces per run, every tool call with its allow
+7. All of it is recorded. Nested traces per run, every tool call with its allow
    or deny outcome, approvals and who decided them, cost against budget, and
-   evaluation results per version.
+   evaluation results per version. What the run established goes back into the
+   team's memory, so the next agent built there starts from it.
+
+These are the kind of requests the builder is given, from the project's own
+demo material. Each one becomes a draft scoped to what the asking team already
+has:
+
+> Read a file from one of our team's repos, find every TODO and FIXME comment
+> in it, and open a single GitHub issue that lists each one with its line number
+> and a one-line summary of what needs doing. Never change any code.
+
+> Check a Terraform file in our infra repo for security problems: S3 buckets
+> with public ACLs, security groups open to 0.0.0.0/0, and hard-coded
+> credentials. Open one GitHub issue listing each problem with the file, the
+> line, and how to fix it. Never change any code.
+
+> Read a pull request in one of our team's repos and post a comment that
+> explains the change in plain English for someone who is not an engineer.
+> Keep it under 150 words. Never approve or merge the pull request.
+
+> Read a GitHub issue from one of our team's repos, search our team's memory for
+> similar past problems, and post a short triage note in #platform-eng-triage
+> on Slack with the likely cause, how urgent it looks, and who should pick it up.
+
+The last clause of each one is the interesting part. "Never change any code"
+and "never approve or merge" are written as instructions, and an instruction is
+only ever a request to a language model. They hold here for a different reason:
+the platform engineering team was never granted `pulls.merge`,
+`contents.write`, `branches.force_push` or `repos.delete` in the first place, so
+an agent built in that team cannot perform them whatever its prompt says and
+whatever the model decides to try. The prompt expresses the intent. The layer
+above it is what makes the intent true.
 
 ## The rule that holds it together
 
@@ -106,6 +175,9 @@ Roles: enterprise admin, team member
 Because the layers are read on every run and never copied into the agent file,
 a policy an admin changes this morning applies to every agent on its next run,
 with no redeploy and nothing for a team to opt into.
+
+That is the shape of the whole thing. An agent inherits its configuration from
+the layers above it, and what it knows from every run before it.
 
 **Third place, NMC2 track, HackTX 26.** Built over one weekend by four people
 against a Sunday-morning code freeze. It was also entered for Best Use of Tiger
@@ -386,9 +458,11 @@ with `E_CONNECTOR_DRIFT`, so a wrapper and the registry cannot quietly diverge.
 
 ## Meta-agents and the platform connector
 
-Five agents ship with the platform at enterprise level with `access: run_only`,
-so any user can run them while only admins can see their configuration. Each
-run is scoped to the caller's team and charged to it.
+The platform ships with its own agents, so the work of building, testing,
+pricing and reviewing an agent is itself inherited rather than done by hand.
+Five of them sit at enterprise level with `access: run_only`, which means any
+user can run them while only admins can see their configuration. Each run is
+scoped to the caller's team and charged to it.
 
 | Meta-agent | Does |
 |---|---|
@@ -397,11 +471,17 @@ run is scoped to the caller's team and charged to it.
 | `cost-optimizer` | Reruns a suite across a grid of allowed models and recommends the cheapest setup that still passes |
 | `security-reviewer` | Checks a spec for least privilege before it can be published |
 | `failure-triage` | Groups failed and denied runs by cause, explains each, and proposes a fix |
+| `memory-curator` | Reads a finished run's redacted trace and proposes what the team should remember from it |
 
-`secret-scanner` is a sixth, with `access: service`, callable as a sub-agent by
-any agent. Meta-agents reach the platform through the built-in `platform`
-connector, which can only be granted at enterprise level and whose every action
-is filtered by the caller exactly as the HTTP routes are.
+The last two are not run by a person. `memory-curator` is invoked by the
+runtime after a root run finishes, and its configuration is currently a runtime
+stand-in rather than a shipped `.agent` file. `secret-scanner` has
+`access: service`, which makes it callable as a sub-agent by any agent that
+declares it.
+
+Meta-agents reach the platform through the built-in `platform` connector, which
+can only be granted at enterprise level and whose every action is filtered by
+the caller exactly as the HTTP routes are.
 
 ---
 
